@@ -1,4 +1,6 @@
 import mailchimpRaw from "@mailchimp/mailchimp_marketing";
+import { cached } from "./api-response";
+import { TAGS } from "./cache-tags";
 
 const apiKey = process.env.MAILCHIMP_API_KEY;
 const server =
@@ -189,7 +191,7 @@ export interface AudienceSummary {
   member_count: number;
 }
 
-export async function listAudiencesSummary(): Promise<AudienceSummary[]> {
+async function _listAudiencesSummary(): Promise<AudienceSummary[]> {
   const audiences = await getAudiences();
   return audiences.map((a) => ({
     id: a.id,
@@ -197,6 +199,10 @@ export async function listAudiencesSummary(): Promise<AudienceSummary[]> {
     member_count: audienceMemberCount(a),
   }));
 }
+export const listAudiencesSummary = cached(_listAudiencesSummary, "mailchimp-audiences", {
+  revalidate: 86400,
+  tags: [TAGS.mailchimpAudiences],
+});
 
 // ── Combined dashboard (sum across all audiences) ────────────────────
 
@@ -207,7 +213,7 @@ export interface DashboardData {
   reports: CampaignReport[];
 }
 
-export async function getDashboardForList(listId: string): Promise<DashboardData> {
+async function _getDashboardForList(listId: string): Promise<DashboardData> {
   const [audience, growth, segments, reports] = await Promise.all([
     getAudience(listId),
     getGrowthHistory(listId),
@@ -216,8 +222,12 @@ export async function getDashboardForList(listId: string): Promise<DashboardData
   ]);
   return { audience, growth, segments, reports };
 }
+export const getDashboardForList = cached(_getDashboardForList, "mailchimp-dashboard-list", {
+  revalidate: 21600,
+  tags: [TAGS.mailchimpDashboard],
+});
 
-export async function getCombinedDashboardData(): Promise<DashboardData> {
+async function _getCombinedDashboardData(): Promise<DashboardData> {
   const audiences = await getAudiences();
   if (audiences.length === 0) {
     throw new Error("No Mailchimp audiences found.");
@@ -294,3 +304,8 @@ export async function getCombinedDashboardData(): Promise<DashboardData> {
     reports,
   };
 }
+export const getCombinedDashboardData = cached(
+  _getCombinedDashboardData,
+  "mailchimp-dashboard-combined",
+  { revalidate: 21600, tags: [TAGS.mailchimpDashboard] }
+);

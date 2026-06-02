@@ -22,13 +22,14 @@ import {
   SegmentedControl,
   Toolbar,
 } from "@/components/dashboard-bits";
+import { LastRefreshedBadge } from "@/components/LastRefreshedBadge";
 
 type Cohort = "all" | "primary" | "secondary";
 
 export default function TeacherTrainingPage() {
   const [event, setEvent] = useState("");
   const [cohort, setCohort] = useState<Cohort>("all");
-  const { data, loading, error } = useTeacherTrainingAgg({
+  const { data, loading, error, fetchedAt, refreshing, refresh } = useTeacherTrainingAgg({
     event,
     cohort: cohort === "all" ? undefined : cohort,
   });
@@ -42,6 +43,9 @@ export default function TeacherTrainingPage() {
 
   return (
     <>
+      <div className="mb-3">
+        <LastRefreshedBadge fetchedAt={fetchedAt} refreshing={refreshing} onRefresh={refresh} />
+      </div>
       <Toolbar>
         <Select
           label="Session"

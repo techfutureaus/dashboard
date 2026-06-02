@@ -1,5 +1,7 @@
 import Airtable from "airtable";
 import Bottleneck from "bottleneck";
+import { cached } from "./api-response";
+import { TAGS } from "./cache-tags";
 
 Airtable.configure({ apiKey: process.env.AIRTABLE_API_KEY });
 
@@ -78,10 +80,14 @@ const SCHOOL_FIELDS = [
   "ICSEA tag",
 ];
 
-export async function getSchoolsRecords() {
+async function _getSchoolsRecords() {
   const records = await fetchTable(TABLES.schools, SCHOOL_FIELDS);
   return toRows(records, SCHOOL_FIELDS);
 }
+export const getSchoolsRecords = cached(_getSchoolsRecords, "airtable-schools", {
+  revalidate: 86400,
+  tags: [TAGS.airtableSchools],
+});
 
 // ── People (Volunteers, Cadetship, Teachers) ────────────────────────
 
@@ -95,7 +101,7 @@ const VOLUNTEER_FIELDS = [
 const TEACHER_FIELDS = ["State", "Years Participated"];
 const CADETSHIP_FIELDS = ["tag", "Created"];
 
-export async function getPeopleRecords() {
+async function _getPeopleRecords() {
   const [volunteers, cadetship, teachers] = await Promise.all([
     fetchTable(TABLES.volunteers, VOLUNTEER_FIELDS),
     fetchTable(TABLES.cadetship, CADETSHIP_FIELDS),
@@ -108,10 +114,14 @@ export async function getPeopleRecords() {
     cadetship: toRows(cadetship, CADETSHIP_FIELDS),
   };
 }
+export const getPeopleRecords = cached(_getPeopleRecords, "airtable-people", {
+  revalidate: 86400,
+  tags: [TAGS.airtablePeople],
+});
 
 // ── Impact (csinschools, students completing, partners) ─────────────
 
-export async function getImpactAgg() {
+async function _getImpactAgg() {
   const [csis, completing, partners] = await Promise.all([
     fetchTable(TABLES.csinschools, [
       "Term",
@@ -151,6 +161,10 @@ export async function getImpactAgg() {
     industryPartnersTotal: partners.length,
   };
 }
+export const getImpactAgg = cached(_getImpactAgg, "airtable-impact", {
+  revalidate: 86400,
+  tags: [TAGS.airtableImpact],
+});
 
 /** Term strings like "2024 Term 1" → "2024-1" for sortability. */
 function termSortKey(term: string): string {
@@ -241,7 +255,7 @@ function upliftPair(
 
 export type TrainingCohort = "all" | "primary" | "secondary";
 
-export async function getTeacherTrainingAgg(options: { event?: string; cohort?: TrainingCohort } = {}) {
+async function _getTeacherTrainingAgg(options: { event?: string; cohort?: TrainingCohort } = {}) {
   const { event, cohort = "all" } = options;
   const fields = [
     "I attended:",
@@ -364,7 +378,12 @@ export async function getTeacherTrainingAgg(options: { event?: string; cohort?: 
 
 // ── Careers Days tab ────────────────────────────────────────────────
 
-export async function getCareersDaysAgg(options: { event?: string } = {}) {
+export const getTeacherTrainingAgg = cached(_getTeacherTrainingAgg, "airtable-teacher-training", {
+  revalidate: 86400,
+  tags: [TAGS.airtableTeacherTraining],
+});
+
+async function _getCareersDaysAgg(options: { event?: string } = {}) {
   const { event } = options;
   const fields = [
     "TF Careers day",
@@ -422,3 +441,7 @@ export async function getCareersDaysAgg(options: { event?: string } = {}) {
     wantedSupport: countByMulti(toRows(records, fields), "2026 careers support"),
   };
 }
+export const getCareersDaysAgg = cached(_getCareersDaysAgg, "airtable-careers-days", {
+  revalidate: 86400,
+  tags: [TAGS.airtableCareersDays],
+});

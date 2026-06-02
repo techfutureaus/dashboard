@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useFreshFetch } from "./useFreshFetch";
+import { TAGS } from "@/lib/cache-tags";
 
 interface CountItem {
   name: string;
@@ -56,82 +57,33 @@ export interface CareersDaysAgg {
   wantedSupport: CountItem[];
 }
 
-function makeStaticHook<T>(url: string) {
-  return function () {
-    const [data, setData] = useState<T | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-      let cancelled = false;
-      fetch(url)
-        .then(async (r) => {
-          const body = await r.json();
-          if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
-          return body as T;
-        })
-        .then((d) => !cancelled && setData(d))
-        .catch((e) => !cancelled && setError(e.message))
-        .finally(() => !cancelled && setLoading(false));
-      return () => {
-        cancelled = true;
-      };
-    }, []);
-
-    return { data, loading, error };
-  };
+function buildUrl(baseUrl: string, params: Record<string, string | undefined>) {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v) qs.set(k, v);
+  }
+  const s = qs.toString();
+  return s ? `${baseUrl}?${s}` : baseUrl;
 }
 
-function makeParamHook<T, P extends Record<string, string | undefined>>(baseUrl: string) {
-  return function (params: P) {
-    const [data, setData] = useState<T | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    const qs = new URLSearchParams();
-    for (const [k, v] of Object.entries(params)) {
-      if (v) qs.set(k, v);
-    }
-    const key = qs.toString();
-    const url = key ? `${baseUrl}?${key}` : baseUrl;
-
-    useEffect(() => {
-      let cancelled = false;
-      setLoading(true);
-      setError(null);
-      fetch(url)
-        .then(async (r) => {
-          const body = await r.json();
-          if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
-          return body as T;
-        })
-        .then((d) => !cancelled && setData(d))
-        .catch((e) => !cancelled && setError(e.message))
-        .finally(() => !cancelled && setLoading(false));
-      return () => {
-        cancelled = true;
-      };
-    }, [url]);
-
-    return { data, loading, error };
-  };
-}
-
-// Schools + People return raw record sets — client aggregates with current filters.
 export function useSchoolsRecords() {
-  return makeStaticHook<{ records: Row[] }>("/api/airtable/schools")();
+  return useFreshFetch<{ records: Row[] }>("/api/airtable/schools", TAGS.airtableSchools);
 }
 
-export const usePeopleRecords = makeStaticHook<PeopleRecords>("/api/airtable/people");
+export function usePeopleRecords() {
+  return useFreshFetch<PeopleRecords>("/api/airtable/people", TAGS.airtablePeople);
+}
 
-export const useImpactAgg = makeStaticHook<ImpactAgg>("/api/airtable/impact");
+export function useImpactAgg() {
+  return useFreshFetch<ImpactAgg>("/api/airtable/impact", TAGS.airtableImpact);
+}
 
-// Training + Careers Days: server filters via query params, client just renders.
-export const useTeacherTrainingAgg = makeParamHook<
-  TeacherTrainingAgg,
-  { event?: string; cohort?: string }
->("/api/airtable/teacher-training");
+export function useTeacherTrainingAgg(params: { event?: string; cohort?: string }) {
+  const url = buildUrl("/api/airtable/teacher-training", params);
+  return useFreshFetch<TeacherTrainingAgg>(url, TAGS.airtableTeacherTraining);
+}
 
-export const useCareersDaysAgg = makeParamHook<CareersDaysAgg, { event?: string }>(
-  "/api/airtable/careers-days"
-);
+export function useCareersDaysAgg(params: { event?: string }) {
+  const url = buildUrl("/api/airtable/careers-days", params);
+  return useFreshFetch<CareersDaysAgg>(url, TAGS.airtableCareersDays);
+}

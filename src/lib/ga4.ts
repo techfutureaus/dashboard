@@ -1,5 +1,7 @@
 import { BetaAnalyticsDataClient, protos as dataProtos } from "@google-analytics/data";
 import { AnalyticsAdminServiceClient } from "@google-analytics/admin";
+import { cached } from "./api-response";
+import { TAGS } from "./cache-tags";
 
 let dataClient: BetaAnalyticsDataClient | null = null;
 let adminClient: AnalyticsAdminServiceClient | null = null;
@@ -40,7 +42,7 @@ export interface Property {
  * Auto-discover all GA4 properties the service account can access.
  * Falls back to a single pinned property if GA4_PROPERTY_ID is set.
  */
-export async function listProperties(): Promise<Property[]> {
+async function _listProperties(): Promise<Property[]> {
   const pinned = process.env.GA4_PROPERTY_ID;
   if (pinned) {
     return [
@@ -70,6 +72,10 @@ export async function listProperties(): Promise<Property[]> {
   properties.sort((a, b) => a.displayName.localeCompare(b.displayName));
   return properties;
 }
+export const listProperties = cached(_listProperties, "ga4-properties", {
+  revalidate: 86400,
+  tags: [TAGS.ga4Properties],
+});
 
 // ── Reports ─────────────────────────────────────────────────────────
 
@@ -132,7 +138,7 @@ function num(v: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-export async function getDashboard(
+async function _getDashboard(
   propertyId: string,
   property: Property,
   range: DateRangeInput
@@ -207,3 +213,7 @@ export async function getDashboard(
 
   return { property, dailyMetrics, totals, topSources, topPages };
 }
+export const getDashboard = cached(_getDashboard, "ga4-dashboard", {
+  revalidate: 43200,
+  tags: [TAGS.ga4Dashboard],
+});

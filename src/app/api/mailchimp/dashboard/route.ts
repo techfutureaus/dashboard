@@ -1,19 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCombinedDashboardData, getDashboardForList } from "@/lib/mailchimp";
-
-// 6h cache — campaign metrics drift through the day as opens/clicks come in.
-// Next.js keys per-URL so each ?listId combo caches independently.
-export const revalidate = 21600;
+import { jsonWithTimestamp } from "@/lib/api-response";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const listId = searchParams.get("listId") || "";
-    const data =
+    const { data, fetchedAt } =
       !listId || listId === "combined"
         ? await getCombinedDashboardData()
         : await getDashboardForList(listId);
-    return NextResponse.json(data);
+    return jsonWithTimestamp(data, fetchedAt);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("Mailchimp dashboard fetch failed:", message);

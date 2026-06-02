@@ -1,13 +1,11 @@
-import { NextResponse } from "next/server";
 import { listProperties } from "@/lib/ga4";
-
-// Properties rarely change — cache for 24h.
-export const revalidate = 86400;
+import { jsonWithTimestamp } from "@/lib/api-response";
+import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    const properties = await listProperties();
-    return NextResponse.json({ properties });
+    const { data: properties, fetchedAt } = await listProperties();
+    return jsonWithTimestamp({ properties }, fetchedAt);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("GA4 properties fetch failed:", message);

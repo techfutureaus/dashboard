@@ -1,12 +1,11 @@
-import { NextResponse } from "next/server";
 import { getImpactAgg } from "@/lib/airtable";
-
-export const revalidate = 86400;
+import { jsonWithTimestamp } from "@/lib/api-response";
+import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    const data = await getImpactAgg();
-    return NextResponse.json(data);
+    const { data, fetchedAt } = await getImpactAgg();
+    return jsonWithTimestamp(data, fetchedAt);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("Airtable impact fetch failed:", message);

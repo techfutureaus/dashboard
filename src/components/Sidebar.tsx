@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-// import { useAuth } from "@/contexts/AuthContext";
+import { usePathname, useRouter } from "next/navigation";
+import { useRefresh } from "@/contexts/RefreshContext";
 
 const navItems = [
   {
@@ -51,7 +51,14 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  // const { user, signOut } = useAuth();
+  const router = useRouter();
+  const { triggerRefresh, refreshing } = useRefresh();
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+    router.refresh();
+  }
 
   return (
     <aside className="flex flex-col w-52 min-h-screen bg-white border-r border-gray-200">
@@ -81,14 +88,44 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Auth UI disabled — restore when auth is re-enabled
-      <div className="px-4 py-4 border-t border-gray-200">
-        {user?.email && <p className="text-xs text-gray-500 truncate mb-2">{user.email}</p>}
-        <button onClick={signOut} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700">
+      <div className="px-3 py-4 border-t border-gray-200">
+        <button
+          onClick={triggerRefresh}
+          disabled={refreshing}
+          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {refreshing ? (
+            <svg className="w-4 h-4 animate-spin text-violet-600" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+          )}
+          {refreshing ? "Refreshing all…" : "Refresh all data"}
+        </button>
+        <button
+          onClick={handleLogout}
+          className="mt-2 w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+            />
+          </svg>
           Sign out
         </button>
       </div>
-      */}
     </aside>
   );
 }

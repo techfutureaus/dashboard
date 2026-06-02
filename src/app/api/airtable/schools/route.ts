@@ -1,12 +1,11 @@
-import { NextResponse } from "next/server";
 import { getSchoolsRecords } from "@/lib/airtable";
-
-export const revalidate = 86400;
+import { jsonWithTimestamp } from "@/lib/api-response";
+import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
-    const records = await getSchoolsRecords();
-    return NextResponse.json({ records });
+    const { data: records, fetchedAt } = await getSchoolsRecords();
+    return jsonWithTimestamp({ records }, fetchedAt);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("Airtable schools fetch failed:", message);

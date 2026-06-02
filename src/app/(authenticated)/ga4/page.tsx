@@ -18,6 +18,7 @@ import { useGa4Properties, useGa4Dashboard } from "@/hooks/useGa4Data";
 import type { Property, Ga4DashboardData } from "@/lib/ga4";
 import { DateRangeControl } from "@/components/DateRangeControl";
 import { Section } from "@/components/dashboard-bits";
+import { LastRefreshedBadge } from "@/components/LastRefreshedBadge";
 import { defaultRange, PRESETS, matchesPreset, type DateRange } from "@/lib/date-presets";
 
 export default function Ga4Page() {
@@ -35,7 +36,7 @@ export default function Ga4Page() {
     }
   }, [properties, propertyId]);
 
-  const { data, loading, error } = useGa4Dashboard(propertyId, range);
+  const { data, loading, error, fetchedAt, refreshing, refresh } = useGa4Dashboard(propertyId, range);
 
   return (
     <div className="p-8 max-w-7xl">
@@ -45,6 +46,9 @@ export default function Ga4Page() {
           <p className="text-sm text-gray-500">
             {data?.property.displayName ?? "Users, sessions, page views, traffic sources."}
           </p>
+          <div className="mt-1">
+            <LastRefreshedBadge fetchedAt={fetchedAt} refreshing={refreshing} onRefresh={refresh} />
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <PropertyPicker

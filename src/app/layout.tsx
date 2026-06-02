@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-// import { AuthProvider } from "@/contexts/AuthContext";
+import { RefreshProvider } from "@/contexts/RefreshContext";
 
 export const metadata: Metadata = {
   title: "TFA Dashboard",
@@ -12,9 +12,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        {/* <AuthProvider> */}
-        {children}
-        {/* </AuthProvider> */}
+        <RefreshProvider>{children}</RefreshProvider>
       </body>
     </html>
   );

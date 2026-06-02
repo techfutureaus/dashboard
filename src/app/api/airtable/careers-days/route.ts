@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCareersDaysAgg } from "@/lib/airtable";
-
-export const revalidate = 86400;
+import { jsonWithTimestamp } from "@/lib/api-response";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const event = searchParams.get("event") || undefined;
-    const data = await getCareersDaysAgg({ event });
-    return NextResponse.json(data);
+    const { data, fetchedAt } = await getCareersDaysAgg({ event });
+    return jsonWithTimestamp(data, fetchedAt);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("Airtable careers-days fetch failed:", message);

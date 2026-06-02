@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useFreshFetch } from "./useFreshFetch";
+import { TAGS } from "@/lib/cache-tags";
 import type {
   Audience,
   AudienceSummary,
@@ -17,55 +18,19 @@ export interface MailchimpDashboardData {
 }
 
 export function useMailchimpData(listId: string = "") {
-  const [data, setData] = useState<MailchimpDashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   const url = listId
     ? `/api/mailchimp/dashboard?listId=${encodeURIComponent(listId)}`
     : "/api/mailchimp/dashboard";
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetch(url)
-      .then(async (r) => {
-        const body = await r.json();
-        if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
-        return body as MailchimpDashboardData;
-      })
-      .then((d) => !cancelled && setData(d))
-      .catch((e) => !cancelled && setError(e.message))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [url]);
-
-  return { data, loading, error };
+  return useFreshFetch<MailchimpDashboardData>(url, TAGS.mailchimpDashboard);
 }
 
 export function useMailchimpAudiences() {
-  const [audiences, setAudiences] = useState<AudienceSummary[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/mailchimp/audiences")
-      .then(async (r) => {
-        const body = await r.json();
-        if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
-        return body.audiences as AudienceSummary[];
-      })
-      .then((d) => !cancelled && setAudiences(d))
-      .catch((e) => !cancelled && setError(e.message))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return { audiences, loading, error };
+  const res = useFreshFetch<{ audiences: AudienceSummary[] }>(
+    "/api/mailchimp/audiences",
+    TAGS.mailchimpAudiences
+  );
+  return {
+    ...res,
+    audiences: res.data?.audiences ?? null,
+  };
 }

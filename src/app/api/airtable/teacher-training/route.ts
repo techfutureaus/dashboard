@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTeacherTrainingAgg, type TrainingCohort } from "@/lib/airtable";
-
-export const revalidate = 86400;
+import { jsonWithTimestamp } from "@/lib/api-response";
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,8 +9,8 @@ export async function GET(request: NextRequest) {
     const cohortParam = searchParams.get("cohort");
     const cohort: TrainingCohort =
       cohortParam === "primary" || cohortParam === "secondary" ? cohortParam : "all";
-    const data = await getTeacherTrainingAgg({ event, cohort });
-    return NextResponse.json(data);
+    const { data, fetchedAt } = await getTeacherTrainingAgg({ event, cohort });
+    return jsonWithTimestamp(data, fetchedAt);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("Airtable teacher-training fetch failed:", message);

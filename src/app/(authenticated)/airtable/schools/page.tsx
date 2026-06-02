@@ -12,6 +12,7 @@ import {
   SegmentedControl,
   Toolbar,
 } from "@/components/dashboard-bits";
+import { LastRefreshedBadge } from "@/components/LastRefreshedBadge";
 import {
   countBy,
   countByMulti,
@@ -37,7 +38,7 @@ const ICSEA_ORDER = [
 type SortMode = "count" | "alpha";
 
 export default function SchoolsPage() {
-  const { data, loading, error } = useSchoolsRecords();
+  const { data, loading, error, fetchedAt, refreshing, refresh } = useSchoolsRecords();
   const [state, setState] = useState("");
   const [sector, setSector] = useState("");
   const [topNValue, setTopNValue] = useState<number>(10);
@@ -83,6 +84,9 @@ export default function SchoolsPage() {
 
   return (
     <>
+      <div className="mb-3">
+        <LastRefreshedBadge fetchedAt={fetchedAt} refreshing={refreshing} onRefresh={refresh} />
+      </div>
       <Toolbar>
         <Select label="State" value={state} onChange={setState} options={stateOptions} />
         <Select label="Sector" value={sector} onChange={setSector} options={sectorOptions} />

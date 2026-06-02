@@ -14,9 +14,10 @@ import {
 } from "recharts";
 import { useImpactAgg } from "@/hooks/useAirtableData";
 import { Section, KpiCard, EmptyHint, Banner } from "@/components/dashboard-bits";
+import { LastRefreshedBadge } from "@/components/LastRefreshedBadge";
 
 export default function ImpactPage() {
-  const { data, loading, error } = useImpactAgg();
+  const { data, loading, error, fetchedAt, refreshing, refresh } = useImpactAgg();
 
   if (loading) return <div className="text-gray-500">Loading…</div>;
   if (error) return <Banner tone="error">{error}</Banner>;
@@ -27,6 +28,9 @@ export default function ImpactPage() {
 
   return (
     <>
+      <div className="mb-3">
+        <LastRefreshedBadge fetchedAt={fetchedAt} refreshing={refreshing} onRefresh={refresh} />
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <KpiCard
           label="Students completing (total)"

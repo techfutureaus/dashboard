@@ -21,11 +21,10 @@ import {
   Select,
   Toolbar,
 } from "@/components/dashboard-bits";
-import { LastRefreshedBadge } from "@/components/LastRefreshedBadge";
 
 export default function CareersDaysPage() {
   const [event, setEvent] = useState("");
-  const { data, loading, error, fetchedAt, refreshing, refresh } = useCareersDaysAgg({ event });
+  const { data, loading, error } = useCareersDaysAgg({ event });
 
   if (loading) return <div className="text-gray-500">Loading…</div>;
   if (error) return <Banner tone="error">{error}</Banner>;
@@ -41,9 +40,6 @@ export default function CareersDaysPage() {
 
   return (
     <>
-      <div className="mb-3">
-        <LastRefreshedBadge fetchedAt={fetchedAt} refreshing={refreshing} onRefresh={refresh} />
-      </div>
       <Toolbar>
         <Select
           label="Event"

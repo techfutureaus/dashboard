@@ -13,7 +13,6 @@ import {
 } from "recharts";
 import { usePeopleRecords } from "@/hooks/useAirtableData";
 import { Section, KpiCard, HBarChart, EmptyHint, Banner, Select, Toolbar } from "@/components/dashboard-bits";
-import { LastRefreshedBadge } from "@/components/LastRefreshedBadge";
 import {
   countBy,
   countByMulti,
@@ -23,7 +22,7 @@ import {
 } from "@/lib/aggregation";
 
 export default function PeoplePage() {
-  const { data, loading, error, fetchedAt, refreshing, refresh } = usePeopleRecords();
+  const { data, loading, error } = usePeopleRecords();
   const [state, setState] = useState("");
 
   const volunteers = data?.volunteers ?? [];
@@ -81,9 +80,6 @@ export default function PeoplePage() {
 
   return (
     <>
-      <div className="mb-3">
-        <LastRefreshedBadge fetchedAt={fetchedAt} refreshing={refreshing} onRefresh={refresh} />
-      </div>
       <Toolbar>
         <Select label="State" value={state} onChange={setState} options={stateOptions} />
         <span className="ml-auto text-xs text-gray-500">

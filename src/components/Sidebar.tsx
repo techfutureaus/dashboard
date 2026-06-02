@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useRefresh } from "@/contexts/RefreshContext";
+import { LastRefreshedBadge } from "./LastRefreshedBadge";
 
 const navItems = [
   {
@@ -52,7 +53,7 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { triggerRefresh, refreshing } = useRefresh();
+  const { triggerRefresh, refreshing, latestFetchedAt } = useRefresh();
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -89,6 +90,9 @@ export function Sidebar() {
       </nav>
 
       <div className="px-3 py-4 border-t border-gray-200">
+        <div className="mb-2 px-1">
+          <LastRefreshedBadge fetchedAt={latestFetchedAt} refreshing={refreshing} />
+        </div>
         <button
           onClick={triggerRefresh}
           disabled={refreshing}

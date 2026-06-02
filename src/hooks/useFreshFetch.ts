@@ -28,7 +28,7 @@ export function useFreshFetch<T>(url: string | null, source: string): FreshFetch
   const [error, setError] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const { refreshKey } = useRefresh();
+  const { refreshKey, reportFetchedAt } = useRefresh();
   const cancelRef = useRef(false);
 
   const load = useCallback(
@@ -54,7 +54,9 @@ export function useFreshFetch<T>(url: string | null, source: string): FreshFetch
         if (cancelRef.current) return;
         setData(body as T);
         const tsHeader = res.headers.get("X-Fetched-At");
-        setFetchedAt(tsHeader ? new Date(tsHeader) : new Date());
+        const ts = tsHeader ? new Date(tsHeader) : new Date();
+        setFetchedAt(ts);
+        reportFetchedAt(ts);
         setError(null);
       } catch (err) {
         if (cancelRef.current) return;
@@ -66,7 +68,7 @@ export function useFreshFetch<T>(url: string | null, source: string): FreshFetch
         }
       }
     },
-    [url, source]
+    [url, source, reportFetchedAt]
   );
 
   // Initial load + reload on URL change OR global refresh event

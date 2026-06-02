@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useRef, useState, ReactNode } from "react";
 
 interface RefreshContextValue {
   /** Increments every time a global refresh is triggered. Hooks watch this to re-fetch. */
@@ -9,6 +9,10 @@ interface RefreshContextValue {
   refreshing: boolean;
   /** Trigger a global refresh: busts all cache tags + bumps refreshKey so hooks re-fetch. */
   triggerRefresh: () => Promise<void>;
+  /** Most recent fetch time across all hooks, surfaced in the sidebar badge. */
+  latestFetchedAt: Date | null;
+  /** Called by useFreshFetch whenever a fetch successfully resolves. */
+  reportFetchedAt: (date: Date) => void;
 }
 
 const RefreshContext = createContext<RefreshContextValue | undefined>(undefined);
@@ -16,6 +20,9 @@ const RefreshContext = createContext<RefreshContextValue | undefined>(undefined)
 export function RefreshProvider({ children }: { children: ReactNode }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [latestFetchedAt, setLatestFetchedAt] = useState<Date | null>(null);
+  // Use a ref to avoid causing re-renders when comparing timestamps.
+  const latestRef = useRef<Date | null>(null);
 
   const triggerRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -29,8 +36,17 @@ export function RefreshProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const reportFetchedAt = useCallback((date: Date) => {
+    if (!latestRef.current || date.getTime() > latestRef.current.getTime()) {
+      latestRef.current = date;
+      setLatestFetchedAt(date);
+    }
+  }, []);
+
   return (
-    <RefreshContext.Provider value={{ refreshKey, refreshing, triggerRefresh }}>
+    <RefreshContext.Provider
+      value={{ refreshKey, refreshing, triggerRefresh, latestFetchedAt, reportFetchedAt }}
+    >
       {children}
     </RefreshContext.Provider>
   );

@@ -18,7 +18,6 @@ import { useMailchimpData, useMailchimpAudiences, type MailchimpDashboardData } 
 import { audienceMemberCount, type AudienceSummary, type SegmentItem } from "@/lib/mailchimp";
 import { DateRangeControl } from "@/components/DateRangeControl";
 import { Section } from "@/components/dashboard-bits";
-import { LastRefreshedBadge } from "@/components/LastRefreshedBadge";
 import { defaultRange, PRESETS, matchesPreset, type DateRange } from "@/lib/date-presets";
 
 export default function MailchimpPage() {
@@ -27,7 +26,7 @@ export default function MailchimpPage() {
   const [dateRange, setDateRange] = useState<DateRange>(defaultRange());
 
   const { audiences } = useMailchimpAudiences();
-  const { data, loading, error, fetchedAt, refreshing, refresh } = useMailchimpData(audienceId);
+  const { data, loading, error } = useMailchimpData(audienceId);
 
   const shellProps = {
     range: dateRange,
@@ -35,9 +34,6 @@ export default function MailchimpPage() {
     audiences: audiences ?? [],
     audienceId,
     onAudienceChange: setAudienceId,
-    fetchedAt,
-    refreshing,
-    onRefresh: refresh,
   };
 
   if (loading) {
@@ -73,9 +69,6 @@ interface ShellProps {
   audiences: AudienceSummary[];
   audienceId: string;
   onAudienceChange: (id: string) => void;
-  fetchedAt: Date | null;
-  refreshing: boolean;
-  onRefresh: () => void;
 }
 
 function PageShell({
@@ -84,9 +77,6 @@ function PageShell({
   audiences,
   audienceId,
   onAudienceChange,
-  fetchedAt,
-  refreshing,
-  onRefresh,
   audienceName,
   children,
 }: ShellProps & {
@@ -101,9 +91,6 @@ function PageShell({
           <p className="text-sm text-gray-500">
             {audienceName ?? "Subscribers, growth, tags, segments, opens & clicks."}
           </p>
-          <div className="mt-1">
-            <LastRefreshedBadge fetchedAt={fetchedAt} refreshing={refreshing} onRefresh={onRefresh} />
-          </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <AudiencePicker

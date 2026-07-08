@@ -48,6 +48,48 @@ const navItems = [
       </svg>
     ),
   },
+  {
+    label: "Engagement",
+    href: "/ga4-engagement",
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M22 12h-4l-3 9L9 3l-3 9H2"
+        />
+      </svg>
+    ),
+  },
+  {
+    label: "Course funnel",
+    href: "/ga4-funnel",
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M3 4h18M6 9h12M9 14h6M11 19h2"
+        />
+      </svg>
+    ),
+  },
+  {
+    label: "Lumen (AI)",
+    href: "/ga4-lumen",
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M12 3l2 7 7 2-7 2-2 7-2-7-7-2 7-2z"
+        />
+      </svg>
+    ),
+  },
 ];
 
 export function Sidebar() {

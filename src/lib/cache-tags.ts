@@ -9,6 +9,9 @@ export const TAGS = {
   mailchimpDashboard: "mailchimp-dashboard",
   ga4Properties: "ga4-properties",
   ga4Dashboard: "ga4-dashboard",
+  ga4Lumen: "ga4-lumen",
+  ga4Engagement: "ga4-engagement",
+  ga4Funnel: "ga4-funnel",
 } as const;
 
 export type CacheTag = (typeof TAGS)[keyof typeof TAGS];

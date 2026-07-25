@@ -10,20 +10,21 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { Ga4ReportPage, formatGaDate } from "@/components/Ga4ReportPage";
-import { useGa4Engagement } from "@/hooks/useGa4Data";
+import { formatGaDate } from "@/components/Ga4ReportPage";
+import { UmamiReportPage } from "@/components/UmamiReportPage";
+import { useUmamiEngagement } from "@/hooks/useUmamiData";
 import { Section, KpiCard, HBarChart, EmptyHint } from "@/components/dashboard-bits";
-import type { EngagementReport } from "@/lib/ga4-lms";
+import type { EngagementReport } from "@/lib/umami";
 
 export default function EngagementPage() {
   return (
-    <Ga4ReportPage
+    <UmamiReportPage
       title="Engagement"
       subtitleFallback="Content views, interactions, media, and progress events."
-      useData={useGa4Engagement}
+      useData={useUmamiEngagement}
     >
       {(data, rangeLabel) => <EngagementBody data={data} rangeLabel={rangeLabel} />}
-    </Ga4ReportPage>
+    </UmamiReportPage>
   );
 }
 
@@ -114,18 +115,33 @@ function EngagementBody({
         </Section>
       </div>
 
-      <Section
-        title="Top lessons by engagement"
-        subtitle="Events grouped by lesson_slug"
-        exportData={data.topLessons}
-        exportName={`engagement-top-lessons-${propId}`}
-      >
-        {data.topLessons.length > 0 ? (
-          <HBarChart data={data.topLessons} color="#8b5cf6" nameWidth={220} />
-        ) : (
-          <EmptyHint>No lesson-level engagement in this range.</EmptyHint>
-        )}
-      </Section>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <Section
+          title="Top lessons by engagement"
+          subtitle="Events grouped by lesson_slug"
+          exportData={data.topLessons}
+          exportName={`engagement-top-lessons-${propId}`}
+        >
+          {data.topLessons.length > 0 ? (
+            <HBarChart data={data.topLessons} color="#8b5cf6" nameWidth={220} />
+          ) : (
+            <EmptyHint>No lesson-level engagement in this range.</EmptyHint>
+          )}
+        </Section>
+
+        <Section
+          title="Teachers vs anonymous"
+          subtitle="lesson_page_view events by user_type (anonymous includes students)"
+          exportData={data.byUserType}
+          exportName={`engagement-user-type-${propId}`}
+        >
+          {data.byUserType.length > 0 ? (
+            <HBarChart data={data.byUserType} color="#f59e0b" nameWidth={140} />
+          ) : (
+            <EmptyHint>No user-type data in this range.</EmptyHint>
+          )}
+        </Section>
+      </div>
     </>
   );
 }

@@ -10,32 +10,33 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { Ga4ReportPage, formatGaDate } from "@/components/Ga4ReportPage";
-import { useGa4Lumen } from "@/hooks/useGa4Data";
+import { formatGaDate } from "@/components/Ga4ReportPage";
+import { UmamiReportPage } from "@/components/UmamiReportPage";
+import { useUmamiLumen } from "@/hooks/useUmamiData";
 import { Section, KpiCard, HBarChart, EmptyHint } from "@/components/dashboard-bits";
-import type { LumenReport } from "@/lib/ga4-lms";
+import type { LumenReport } from "@/lib/umami";
 
 export default function LumenPage() {
   return (
-    <Ga4ReportPage
+    <UmamiReportPage
       title="Lumen (AI editor)"
       subtitleFallback="Scenario usage, prompt clicks, and token consumption."
-      useData={useGa4Lumen}
+      useData={useUmamiLumen}
     >
       {(data, rangeLabel) => <LumenBody data={data} rangeLabel={rangeLabel} />}
-    </Ga4ReportPage>
+    </UmamiReportPage>
   );
 }
 
 function LumenBody({ data, rangeLabel }: { data: LumenReport; rangeLabel: string }) {
   const t = data.totals;
-  const tokenSeries = useMemo(
+  const responseSeries = useMemo(
     () =>
-      data.tokensDaily.map((d) => ({
+      data.responsesDaily.map((d) => ({
         label: formatGaDate(d.date),
-        Tokens: d.totalTokens,
+        Responses: d.count,
       })),
-    [data.tokensDaily]
+    [data.responsesDaily]
   );
   const propId = data.property.id;
 
@@ -58,25 +59,25 @@ function LumenBody({ data, rangeLabel }: { data: LumenReport; rangeLabel: string
       </div>
 
       <Section
-        title="Tokens over time"
-        subtitle={`Total tokens per day · ${rangeLabel}`}
-        exportData={tokenSeries}
-        exportName={`lumen-tokens-${propId}`}
+        title="AI responses over time"
+        subtitle={`Prompt responses per day · ${rangeLabel}`}
+        exportData={responseSeries}
+        exportName={`lumen-responses-${propId}`}
       >
-        {tokenSeries.length > 0 ? (
+        {responseSeries.length > 0 ? (
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={tokenSeries} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <LineChart data={responseSeries} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Line type="monotone" dataKey="Tokens" stroke="#8b5cf6" dot={false} />
+                <Line type="monotone" dataKey="Responses" stroke="#8b5cf6" dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         ) : (
-          <EmptyHint>No token usage in this range yet.</EmptyHint>
+          <EmptyHint>No AI activity in this range yet.</EmptyHint>
         )}
       </Section>
 
@@ -98,18 +99,18 @@ function LumenBody({ data, rangeLabel }: { data: LumenReport; rangeLabel: string
         </Section>
 
         <Section
-          title="Tokens by scenario"
-          subtitle="Token consumption per activity"
+          title="Responses by scenario"
+          subtitle="AI responses per activity"
           exportData={data.byScenario}
-          exportName={`lumen-scenario-tokens-${propId}`}
+          exportName={`lumen-scenario-responses-${propId}`}
         >
-          {data.byScenario.some((s) => s.totalTokens > 0) ? (
+          {data.byScenario.some((s) => s.responses > 0) ? (
             <HBarChart
-              data={data.byScenario.map((s) => ({ name: s.scenario, count: s.totalTokens }))}
+              data={data.byScenario.map((s) => ({ name: s.scenario, count: s.responses }))}
               color="#8b5cf6"
             />
           ) : (
-            <EmptyHint>No token data in this range.</EmptyHint>
+            <EmptyHint>No responses in this range.</EmptyHint>
           )}
         </Section>
       </div>

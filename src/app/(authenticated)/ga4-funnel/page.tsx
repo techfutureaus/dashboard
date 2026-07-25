@@ -1,9 +1,9 @@
 "use client";
 
-import { Ga4ReportPage } from "@/components/Ga4ReportPage";
-import { useGa4Funnel } from "@/hooks/useGa4Data";
+import { UmamiReportPage } from "@/components/UmamiReportPage";
+import { useUmamiFunnel } from "@/hooks/useUmamiData";
 import { Section, KpiCard, HBarChart, EmptyHint } from "@/components/dashboard-bits";
-import type { FunnelReport } from "@/lib/ga4-lms";
+import type { FunnelReport } from "@/lib/umami";
 
 const STEP_LABELS: Record<string, string> = {
   course_view: "Course view",
@@ -16,13 +16,13 @@ const STEP_LABELS: Record<string, string> = {
 
 export default function FunnelPage() {
   return (
-    <Ga4ReportPage
+    <UmamiReportPage
       title="Course funnel & completion"
       subtitleFallback="View → lesson → quiz → completion, and completions by course/lesson."
-      useData={useGa4Funnel}
+      useData={useUmamiFunnel}
     >
       {(data, rangeLabel) => <FunnelBody data={data} rangeLabel={rangeLabel} />}
-    </Ga4ReportPage>
+    </UmamiReportPage>
   );
 }
 

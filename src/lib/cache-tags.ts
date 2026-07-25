@@ -12,6 +12,9 @@ export const TAGS = {
   ga4Lumen: "ga4-lumen",
   ga4Engagement: "ga4-engagement",
   ga4Funnel: "ga4-funnel",
+  umamiEngagement: "umami-engagement",
+  umamiFunnel: "umami-funnel",
+  umamiLumen: "umami-lumen",
 } as const;
 
 export type CacheTag = (typeof TAGS)[keyof typeof TAGS];

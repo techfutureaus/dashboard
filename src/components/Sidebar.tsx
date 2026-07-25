@@ -50,7 +50,7 @@ const navItems = [
   },
   {
     label: "Engagement",
-    href: "/ga4-engagement",
+    href: "/engagement",
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
@@ -64,7 +64,7 @@ const navItems = [
   },
   {
     label: "Course funnel",
-    href: "/ga4-funnel",
+    href: "/funnel",
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
@@ -78,7 +78,7 @@ const navItems = [
   },
   {
     label: "Lumen (AI)",
-    href: "/ga4-lumen",
+    href: "/lumen",
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path

@@ -71,13 +71,12 @@ export function useFreshFetch<T>(url: string | null, source: string): FreshFetch
     [url, source, reportFetchedAt]
   );
 
-  // Initial load + reload on URL change OR global refresh event
+  // Initial load + reload on URL change OR global refresh event. A null url
+  // pauses fetching; the paused state is derived at the return instead of
+  // being synced into state here (react-hooks/set-state-in-effect).
   useEffect(() => {
-    if (!url) {
-      setData(null);
-      setLoading(false);
-      return;
-    }
+    if (!url) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount by design: load() flips the loading flag before awaiting
     load(false);
     return () => {
       cancelRef.current = true;
@@ -97,5 +96,9 @@ export function useFreshFetch<T>(url: string | null, source: string): FreshFetch
 
   const refresh = useCallback(() => load(true), [load]);
 
+  // With no url the fetch is paused: expose empty state without storing it.
+  if (!url) {
+    return { data: null, loading: false, error: null, fetchedAt, refreshing: false, refresh };
+  }
   return { data, loading, error, fetchedAt, refreshing, refresh };
 }

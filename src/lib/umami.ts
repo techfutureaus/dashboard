@@ -30,13 +30,17 @@ export interface UmamiRange {
   end?: string | null;
 }
 
+// "All time" (no start date) really means all time: from before the site
+// existed. The LMS launched mid-2026, so this epoch predates all data.
+const SITE_EPOCH = new Date("2026-01-01T00:00:00").getTime();
+
 function rangeToMs(range: UmamiRange): { startAt: number; endAt: number } {
   const endAt = range.end
     ? new Date(`${range.end}T23:59:59.999`).getTime()
     : Date.now();
   const startAt = range.start
     ? new Date(`${range.start}T00:00:00`).getTime()
-    : endAt - 365 * 24 * 60 * 60 * 1000;
+    : SITE_EPOCH;
   return { startAt, endAt };
 }
 

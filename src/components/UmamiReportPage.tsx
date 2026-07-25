@@ -29,7 +29,10 @@ export function UmamiReportPage<T extends { property: UmamiSource }>({
 }) {
   const [range, setRange] = useState<DateRange>(defaultRange());
   const { data, loading, error } = useData(range);
-  const rangeLabel = describeRange(range);
+  // Unlike the GA4 pages (whose backend caps open ranges at 365 days), the
+  // Umami routes treat a missing start as genuinely all-time — label honestly.
+  const rangeLabel =
+    !range.start && !range.end ? "All time" : describeRange(range);
 
   return (
     <div className="p-8 max-w-7xl">

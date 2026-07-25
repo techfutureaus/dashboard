@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { format } from "date-fns";
 import { useGa4Properties } from "@/hooks/useGa4Data";
 import type { Property } from "@/lib/ga4";
@@ -38,14 +38,12 @@ export function Ga4ReportPage<T extends { property: Property }>({
     loading: propsLoading,
     error: propsError,
   } = useGa4Properties();
-  const [propertyId, setPropertyId] = useState<string | null>(null);
+  const [chosenPropertyId, setPropertyId] = useState<string | null>(null);
   const [range, setRange] = useState<DateRange>(defaultRange());
 
-  useEffect(() => {
-    if (!propertyId && properties && properties.length > 0) {
-      setPropertyId(properties[0].id);
-    }
-  }, [properties, propertyId]);
+  // Derive the effective selection instead of syncing it into state via an
+  // effect: default to the first property until the user picks one.
+  const propertyId = chosenPropertyId ?? properties?.[0]?.id ?? null;
 
   const { data, loading, error } = useData(propertyId, range);
   const rangeLabel = describeRange(range);

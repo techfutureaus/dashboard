@@ -348,16 +348,19 @@ async function _getLumenReport(range: UmamiRange): Promise<LumenReport> {
   bump(responsesByScenario, "responses");
 
   const responses = counts.get("ai_prompt_response") ?? 0;
+  // Some senders omit total_tokens and only send input/output — fall back to
+  // their sum so the headline KPI stays meaningful.
+  const total = totalTokens > 0 ? totalTokens : inputTokens + outputTokens;
   return {
     property: UMAMI_SOURCE,
     totals: {
       sessions: counts.get("ai_session_start") ?? 0,
       promptClicks: counts.get("ai_prompt_click") ?? 0,
       responses,
-      totalTokens,
+      totalTokens: total,
       inputTokens,
       outputTokens,
-      avgTokensPerResponse: responses > 0 ? Math.round(totalTokens / responses) : 0,
+      avgTokensPerResponse: responses > 0 ? Math.round(total / responses) : 0,
     },
     byScenario: [...scenarios.entries()]
       .map(([scenario, v]) => ({ scenario, ...v }))

@@ -30,17 +30,24 @@ export interface UmamiRange {
   end?: string | null;
 }
 
-// "All time" (no start date) really means all time: from before the site
-// existed. The LMS launched mid-2026, so this epoch predates all data.
-const SITE_EPOCH = new Date("2026-01-01T00:00:00").getTime();
+// Queries never reach before this moment. Two demo-seed runs polluted the
+// production website on 22 Jul 2026 with ~500 fake events (fake visitors,
+// quiz completions, Lumen sessions — see the main app's
+// scratchpad/umami-seed.ts). Umami Cloud events are immutable, so the fake
+// data can't be deleted — instead every query starts at Sydney midnight
+// after the seed day. Real Umami tracking only went live the evening of
+// 22 Jul, so this costs a few hours of launch-evening traffic at most.
+const DATA_EPOCH = new Date("2026-07-23T00:00:00+10:00").getTime();
 
 function rangeToMs(range: UmamiRange): { startAt: number; endAt: number } {
-  const endAt = range.end
-    ? new Date(`${range.end}T23:59:59.999`).getTime()
-    : Date.now();
-  const startAt = range.start
-    ? new Date(`${range.start}T00:00:00`).getTime()
-    : SITE_EPOCH;
+  const startAt = Math.max(
+    range.start ? new Date(`${range.start}T00:00:00`).getTime() : DATA_EPOCH,
+    DATA_EPOCH
+  );
+  const endAt = Math.max(
+    range.end ? new Date(`${range.end}T23:59:59.999`).getTime() : Date.now(),
+    startAt
+  );
   return { startAt, endAt };
 }
 
@@ -90,6 +97,14 @@ async function eventCounts(range: UmamiRange): Promise<Map<string, number>> {
   return map;
 }
 
+// Property values only the demo seeder ever sent (real course/lesson slugs
+// differ). Belt-and-braces alongside the DATA_EPOCH clamp, in case the seeder
+// is ever re-run after the epoch.
+const SEEDED_VALUES: Record<string, string[]> = {
+  course_slug: ["ai-course"],
+  lesson_slug: ["machine-learning"],
+};
+
 /** Distinct values of one event property, with counts. */
 async function eventDataValues(
   range: UmamiRange,
@@ -105,9 +120,10 @@ async function eventDataValues(
     event: eventName,
     propertyName,
   });
+  const seeded = SEEDED_VALUES[propertyName] ?? [];
   return rows
     .map((r) => ({ name: String(rowName(r)), count: rowCount(r) }))
-    .filter((r) => r.name !== "");
+    .filter((r) => r.name !== "" && !seeded.includes(r.name));
 }
 
 /** Sum a numeric event property (Σ value × occurrences), e.g. token counts. */

@@ -101,8 +101,15 @@ async function eventCounts(range: UmamiRange): Promise<Map<string, number>> {
 // differ). Belt-and-braces alongside the DATA_EPOCH clamp, in case the seeder
 // is ever re-run after the epoch.
 const SEEDED_VALUES: Record<string, string[]> = {
-  course_slug: ["ai-course"],
   lesson_slug: ["machine-learning"],
+};
+
+// The AI course launched as "ai-course" and was renamed to "intro-to-ai" on
+// 25 Jul 2026 (see the Sanity redirect), so real events from the first days
+// carry the old slug — fold them into the current one. (The seeder also used
+// "ai-course", but its events all predate DATA_EPOCH.)
+const VALUE_ALIASES: Record<string, Record<string, string>> = {
+  course_slug: { "ai-course": "intro-to-ai" },
 };
 
 /** Distinct values of one event property, with counts. */
@@ -121,9 +128,15 @@ async function eventDataValues(
     propertyName,
   });
   const seeded = SEEDED_VALUES[propertyName] ?? [];
-  return rows
-    .map((r) => ({ name: String(rowName(r)), count: rowCount(r) }))
-    .filter((r) => r.name !== "" && !seeded.includes(r.name));
+  const aliases = VALUE_ALIASES[propertyName] ?? {};
+  const merged = new Map<string, number>();
+  for (const r of rows) {
+    const raw = String(rowName(r));
+    if (raw === "" || seeded.includes(raw)) continue;
+    const name = aliases[raw] ?? raw;
+    merged.set(name, (merged.get(name) ?? 0) + rowCount(r));
+  }
+  return [...merged.entries()].map(([name, count]) => ({ name, count }));
 }
 
 /** Sum a numeric event property (Σ value × occurrences), e.g. token counts. */

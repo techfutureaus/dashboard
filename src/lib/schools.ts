@@ -6,38 +6,19 @@
 // Deliberately school-only: no names, emails, or uids leave this module —
 // the dashboard's teacher rows stay pseudonymous (per the Aug 2026 decision).
 //
-// Setup: Firebase console → Project settings → Service accounts → "Generate
-// new private key", then put the JSON (as one line) in the dashboard env as
-// FIREBASE_SERVICE_ACCOUNT. Without it the report still works — teacher rows
-// just show no school.
+// Needs FIREBASE_SERVICE_ACCOUNT (see firebase-admin.ts). Without it the
+// report still works — teacher rows just show no school.
+
+import { getAdminDb } from "./firebase-admin";
 
 export interface SchoolInfo {
   school: string | null;
   schoolId: string | null;
 }
 
-let initFailed = false;
-
-async function getDb() {
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!raw || initFailed) return null;
-  try {
-    const { initializeApp, getApps, cert } = await import("firebase-admin/app");
-    const { getFirestore } = await import("firebase-admin/firestore");
-    const app =
-      getApps()[0] ?? initializeApp({ credential: cert(JSON.parse(raw)) });
-    return getFirestore(app);
-  } catch (err) {
-    // Bad JSON / bad key: report once, then behave like "not configured".
-    initFailed = true;
-    console.error("Firebase Admin init failed:", err);
-    return null;
-  }
-}
-
 /** True when a service account is configured and usable. */
 export async function schoolsAvailable(): Promise<boolean> {
-  return (await getDb()) !== null;
+  return (await getAdminDb()) !== null;
 }
 
 /** analyticsId → school for the given ids. Missing ids are simply absent. */
@@ -46,7 +27,7 @@ export async function getSchoolsByAnalyticsId(
 ): Promise<Map<string, SchoolInfo>> {
   const out = new Map<string, SchoolInfo>();
   const ids = [...new Set(analyticsIds)].filter(Boolean);
-  const db = await getDb();
+  const db = await getAdminDb();
   if (!db || ids.length === 0) return out;
 
   // Firestore `in` queries take at most 30 values per query.

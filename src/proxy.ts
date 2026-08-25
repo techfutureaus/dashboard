@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const SESSION_COOKIE = "session";
-const PUBLIC_ROUTES = ["/login", "/api/auth"];
+// /api/cron routes are called by Vercel cron (no session cookie) and enforce
+// their own CRON_SECRET check instead.
+const PUBLIC_ROUTES = ["/login", "/api/auth", "/api/cron"];
 const PASSWORD = process.env.DASHBOARD_PASSWORD;
 
 function timingSafeEqual(a: string, b: string): boolean {

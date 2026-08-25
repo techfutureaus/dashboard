@@ -13,6 +13,7 @@ import {
 } from "./umami";
 import { getCourseStructure, type CourseNode } from "./sanity-structure";
 import { getSchoolsByAnalyticsId, schoolsAvailable } from "./schools";
+import { aliasCourse } from "./course-aliases";
 
 // The "Website" report: one payload behind the single-page TechFutures
 // website dashboard. Course/lesson/page rows come from the live Sanity
@@ -27,11 +28,6 @@ import { getSchoolsByAnalyticsId, schoolsAvailable } from "./schools";
 //   so token sums are top-100 approximations.
 export const TAG_SINCE = "2026-08-21";
 const TIMEZONE = "Australia/Sydney";
-
-// The AI course's pre-25-Jul slug — folded into the current one everywhere.
-const COURSE_SLUG_ALIASES: Record<string, string> = {
-  "ai-course": "intro-to-ai",
-};
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
@@ -174,8 +170,6 @@ function statBlock(raw: Record<string, unknown>): StatBlock {
     totaltime: n(raw.totaltime),
   };
 }
-
-const aliasCourse = (slug: string) => COURSE_SLUG_ALIASES[slug] ?? slug;
 
 // ── report assembly ──────────────────────────────────────────────────────────
 

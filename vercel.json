@@ -4,6 +4,10 @@
     {
       "path": "/api/refresh?source=all",
       "schedule": "0 4 * * 1"
+    },
+    {
+      "path": "/api/cron/rollup",
+      "schedule": "0 17 * * 0"
     }
   ]
 }

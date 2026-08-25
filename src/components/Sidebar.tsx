@@ -5,7 +5,23 @@ import { usePathname, useRouter } from "next/navigation";
 import { useRefresh } from "@/contexts/RefreshContext";
 import { LastRefreshedBadge } from "./LastRefreshedBadge";
 
+// The old Engagement / Course funnel / Lumen pages are hidden from the nav
+// (Aug 2026) — superseded by the Website page. Their routes still work by URL.
 const navItems = [
+  {
+    label: "Website",
+    href: "/website",
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-9a17 17 0 000 18m0-18a17 17 0 010 18M3 12h18"
+        />
+      </svg>
+    ),
+  },
   {
     label: "Airtable",
     href: "/airtable",
@@ -44,48 +60,6 @@ const navItems = [
           strokeLinejoin="round"
           strokeWidth={2}
           d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-        />
-      </svg>
-    ),
-  },
-  {
-    label: "Engagement",
-    href: "/engagement",
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M22 12h-4l-3 9L9 3l-3 9H2"
-        />
-      </svg>
-    ),
-  },
-  {
-    label: "Course funnel",
-    href: "/funnel",
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M3 4h18M6 9h12M9 14h6M11 19h2"
-        />
-      </svg>
-    ),
-  },
-  {
-    label: "Lumen (AI)",
-    href: "/lumen",
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M12 3l2 7 7 2-7 2-2 7-2-7-7-2 7-2z"
         />
       </svg>
     ),

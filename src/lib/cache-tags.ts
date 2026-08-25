@@ -12,6 +12,7 @@ export const TAGS = {
   umamiEngagement: "umami-engagement",
   umamiFunnel: "umami-funnel",
   umamiLumen: "umami-lumen",
+  umamiWebsite: "umami-website",
 } as const;
 
 export type CacheTag = (typeof TAGS)[keyof typeof TAGS];

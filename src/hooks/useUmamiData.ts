@@ -8,6 +8,7 @@ import type {
   FunnelReport,
   LumenReport,
 } from "@/lib/umami";
+import type { WebsiteReport } from "@/lib/website";
 import type { DateRange } from "@/lib/date-presets";
 
 // Build a `/api/umami/<report>` URL with the selected date range. Unlike GA4
@@ -38,5 +39,12 @@ export function useUmamiLumen(range: DateRange) {
   return useFreshFetch<LumenReport>(
     umamiUrl("/api/umami/lumen", range),
     TAGS.umamiLumen
+  );
+}
+
+export function useUmamiWebsite(range: DateRange) {
+  return useFreshFetch<WebsiteReport>(
+    umamiUrl("/api/umami/website", range),
+    TAGS.umamiWebsite
   );
 }

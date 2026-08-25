@@ -39,7 +39,7 @@ export interface UmamiRange {
 // 22 Jul, so this costs a few hours of launch-evening traffic at most.
 const DATA_EPOCH = new Date("2026-07-23T00:00:00+10:00").getTime();
 
-function rangeToMs(range: UmamiRange): { startAt: number; endAt: number } {
+export function rangeToMs(range: UmamiRange): { startAt: number; endAt: number } {
   const startAt = Math.max(
     range.start ? new Date(`${range.start}T00:00:00`).getTime() : DATA_EPOCH,
     DATA_EPOCH
@@ -51,7 +51,7 @@ function rangeToMs(range: UmamiRange): { startAt: number; endAt: number } {
   return { startAt, endAt };
 }
 
-async function umamiFetch<T>(
+export async function umamiFetch<T>(
   path: string,
   params: Record<string, string | number>
 ): Promise<T> {
@@ -84,7 +84,7 @@ const rowName = (r: XY) => r.x ?? r.value ?? "";
 const rowCount = (r: XY) => Number(r.y ?? r.total ?? 0) || 0;
 
 /** Event totals by event name over the range. */
-async function eventCounts(range: UmamiRange): Promise<Map<string, number>> {
+export async function eventCounts(range: UmamiRange): Promise<Map<string, number>> {
   const { startAt, endAt } = rangeToMs(range);
   const rows = await umamiFetch<XY[]>("/metrics", {
     type: "event",
@@ -113,7 +113,7 @@ const VALUE_ALIASES: Record<string, Record<string, string>> = {
 };
 
 /** Distinct values of one event property, with counts. */
-async function eventDataValues(
+export async function eventDataValues(
   range: UmamiRange,
   eventName: string,
   propertyName: string
@@ -140,7 +140,7 @@ async function eventDataValues(
 }
 
 /** Sum a numeric event property (Σ value × occurrences), e.g. token counts. */
-async function eventDataSum(
+export async function eventDataSum(
   range: UmamiRange,
   eventName: string,
   propertyName: string
@@ -151,7 +151,7 @@ async function eventDataSum(
 
 /** Daily counts per event name. Dates come back as YYYYMMDD (matches the GA4
  * pages' formatGaDate helper). */
-async function eventSeries(
+export async function eventSeries(
   range: UmamiRange
 ): Promise<Map<string, { date: string; count: number }[]>> {
   const { startAt, endAt } = rangeToMs(range);

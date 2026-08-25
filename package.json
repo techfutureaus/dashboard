@@ -19,6 +19,7 @@
     "airtable": "^0.12.2",
     "bottleneck": "^2.19.5",
     "date-fns": "^4.1.0",
+    "firebase-admin": "^14.3.0",
     "next": "^16.0.7",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",

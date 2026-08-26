@@ -334,6 +334,13 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
 
   return (
     <>
+      {data.dataThrough && (
+        <p className="text-xs text-gray-400 mb-4 -mt-1">
+          Data through {fmtDate(`${data.dataThrough}T12:00:00`)} · refreshed daily from the
+          analytics archive
+        </p>
+      )}
+
       {/* ── Audience ───────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <KpiCard label="Visitors" value={num(total.visitors)} sub={rangeLabel} />

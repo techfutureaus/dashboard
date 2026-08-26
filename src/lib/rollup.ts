@@ -1,31 +1,38 @@
-// Weekly Umami → Firestore archive rollups (docs/analytics-decision.md §4).
+// Daily Umami → Firestore archive (see archive-types.ts for the layout and
+// docs/analytics-decision.md §4 for the original decision).
 //
-// Umami Cloud deletes raw data after 2 years; these daily rollup docs are the
-// "ours forever" copy — funder reports, term-vs-term questions, and insurance
-// against any future tool switch. Daily granularity, per-lesson breakdowns,
-// Lumen included. Written idempotently (same doc IDs overwrite), so re-running
-// a day is always safe and recent days are re-written each run to pick up
-// late-arriving events.
-//
-// Firestore layout:
-//   analytics_daily/{YYYY-MM-DD}                      — site-wide day totals
-//   analytics_daily_lessons/{YYYY-MM-DD}_{course}_{lesson} — per-lesson day
+// This job is the ONLY thing that talks to Umami: the dashboard serves
+// entirely from the archive, at most one day behind. Runs daily via Vercel
+// cron (~3am Sydney), backfills any missing days since the epoch, re-writes
+// the trailing couple of days (late events), and upserts recent sessions
+// (session rows keep evolving while a visitor returns).
 
 import { umamiFetch } from "./umami";
-import { getCourseStructure } from "./sanity-structure";
 import { getAdminDb } from "./firebase-admin";
 import { aliasCourse } from "./course-aliases";
+import {
+  DAYS_COLLECTION,
+  RAW_COLLECTION,
+  SESSIONS_COLLECTION,
+  ARCHIVE_EPOCH,
+  ARCHIVE_SCHEMA,
+  type ArchiveDay,
+  type ArchiveSession,
+  type LessonDay,
+  type GeoMaps,
+  type LumenSlice,
+} from "./archive-types";
 
-// First day with only real data (the 22 Jul demo-seed day is excluded, same
-// epoch as the live reports).
-export const ROLLUP_EPOCH = "2026-07-23";
+export const ROLLUP_EPOCH = ARCHIVE_EPOCH;
 const TIMEZONE = "Australia/Sydney";
-// Cap work per invocation so the Vercel function stays inside its time limit;
-// missing older days are picked up by subsequent runs.
-const MAX_DAYS_PER_RUN = 25;
-// Always re-write this many trailing days: events can arrive late, and the
-// current day at run time is partial.
-const REDO_RECENT_DAYS = 8;
+// Work caps per invocation (Vercel functions get 60s): each day costs ~50
+// API calls. Missed days are picked up by the next run — the job is
+// idempotent and self-healing.
+const MAX_DAYS_PER_RUN = 12;
+const REDO_RECENT_DAYS = 2;
+const SESSION_WINDOW_DAYS = 7; // upsert sessions active in the last week
+const RAW_PAGE_SIZE = 200;
+const RAW_MAX_PAGES = 20;
 
 // ── Sydney day boundaries (DST-correct, no tz library) ───────────────────────
 
@@ -47,15 +54,14 @@ function tzOffsetMs(utcMs: number): number {
 }
 
 /** UTC ms of local midnight starting the given YYYY-MM-DD in Sydney. */
-function dayStartMs(date: string): number {
+export function dayStartMs(date: string): number {
   const utcMidnight = new Date(`${date}T00:00:00Z`).getTime();
-  // Two passes so a DST transition on the day itself still resolves correctly.
   let ts = utcMidnight - tzOffsetMs(utcMidnight);
   ts = utcMidnight - tzOffsetMs(ts);
   return ts;
 }
 
-const todaySydney = () =>
+export const todaySydney = () =>
   new Date().toLocaleDateString("en-CA", { timeZone: TIMEZONE });
 
 function* dayRange(from: string, toExclusive: string): Generator<string> {
@@ -68,47 +74,13 @@ function* dayRange(from: string, toExclusive: string): Generator<string> {
   }
 }
 
-// ── per-day assembly ─────────────────────────────────────────────────────────
-
-const LESSON_EVENT_FIELDS: Record<string, string> = {
-  pageViews: "lesson_page_view",
-  quizCompletes: "quiz_complete",
-  inlineQuizCompletes: "inline_quiz_complete",
-  certificates: "certificate_generated",
-  feedback: "lesson_feedback_submit",
-};
-const INTERACTION_EVENTS = [
-  "accordion_open", "reveal_open", "tab_switch", "audio_play",
-  "video_start", "video_complete", "resource_click",
-];
-
-export interface DayRollup {
-  date: string;
-  stats: { pageviews: number; visitors: number; visits: number; totaltime: number };
-  teacherStats: { pageviews: number; visitors: number; visits: number; totaltime: number };
-  events: Record<string, number>;
-  courseViews: Record<string, number>;
-  lumen: {
-    sessions: number;
-    promptClicks: number;
-    responses: number;
-    inputTokens: number;
-    outputTokens: number;
-    scenarioSessions: Record<string, number>;
-  };
+function nextDay(date: string): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
-export interface LessonRollup {
-  date: string;
-  courseSlug: string;
-  lessonSlug: string;
-  pageViews: number;
-  quizCompletes: number;
-  inlineQuizCompletes: number;
-  certificates: number;
-  feedback: number;
-  interactions: number;
-}
+// ── shared bits ──────────────────────────────────────────────────────────────
 
 type XY = { x?: string | null; y?: number; value?: string | null; total?: number };
 const rowName = (r: XY) => String(r.x ?? r.value ?? "");
@@ -128,6 +100,7 @@ function makePool(size: number) {
     }
   };
 }
+type Pool = ReturnType<typeof makePool>;
 
 function statBlock(raw: Record<string, unknown>) {
   const n = (v: unknown) =>
@@ -140,15 +113,27 @@ function statBlock(raw: Record<string, unknown>) {
   };
 }
 
-async function buildDay(
-  date: string,
-  lessonToCourse: Map<string, string>,
-  pool: <T>(fn: () => Promise<T>) => Promise<T>
-): Promise<{ day: DayRollup; lessons: LessonRollup[] }> {
+const toMap = (rows: { name: string; count: number }[]) =>
+  Object.fromEntries(rows.map((r) => [r.name, r.count]));
+
+const LESSON_EVENT_FIELDS: Record<string, keyof LessonDay> = {
+  lesson_view: "lessonViews",
+  lesson_page_view: "pageViews",
+  quiz_complete: "quizCompletes",
+  inline_quiz_complete: "inlineQuizCompletes",
+  certificate_generated: "certificates",
+  lesson_feedback_submit: "feedback",
+};
+const INTERACTION_EVENTS = [
+  "accordion_open", "reveal_open", "tab_switch", "audio_play",
+  "video_start", "video_complete", "resource_click",
+];
+
+// ── per-day assembly (~50 Umami calls, all pooled) ───────────────────────────
+
+async function buildDay(date: string, pool: Pool): Promise<ArchiveDay> {
   const startAt = dayStartMs(date);
-  const nextDay = new Date(`${date}T12:00:00Z`);
-  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-  const endAt = dayStartMs(nextDay.toISOString().slice(0, 10)) - 1;
+  const endAt = dayStartMs(nextDay(date)) - 1;
 
   const values = (event: string, propertyName: string) =>
     pool(() =>
@@ -159,101 +144,276 @@ async function buildDay(
             .filter((r) => r.name !== "")
       )
     );
-  const sumTokens = (propertyName: string) =>
+  const metrics = (type: string, extra: Record<string, string | number> = {}) =>
+    pool(() =>
+      umamiFetch<XY[]>("/metrics", { type, startAt, endAt, limit: 500, ...extra }).then(
+        (rows) =>
+          rows
+            .map((r) => ({ name: rowName(r), count: rowCount(r) }))
+            .filter((r) => r.name !== "")
+      )
+    );
+  const numericSum = (propertyName: string) =>
     values("ai_prompt_response", propertyName).then((rows) =>
       rows.reduce((acc, r) => acc + (Number(r.name) || 0) * r.count, 0)
     );
-
-  const [stats, teacherStats, eventRows, courseViewRows, scenarioRows, inputTokens, outputTokens] =
-    await Promise.all([
-      pool(() => umamiFetch<Record<string, unknown>>("/stats", { startAt, endAt })),
-      pool(() =>
-        umamiFetch<Record<string, unknown>>("/stats", { startAt, endAt, tag: "teacher" })
-      ),
-      pool(() =>
-        umamiFetch<XY[]>("/metrics", { type: "event", startAt, endAt, limit: 500 })
-      ),
-      values("course_view", "course_slug"),
-      values("ai_session_start", "session_type"),
-      sumTokens("input_tokens"),
-      sumTokens("output_tokens"),
+  const geoMaps = async (tag?: string): Promise<GeoMaps> => {
+    const extra: Record<string, string | number> = tag ? { tag } : {};
+    const [countries, regions, cities] = await Promise.all([
+      metrics("country", extra),
+      metrics("region", extra),
+      metrics("city", extra),
     ]);
-
-  const lessonValueSets = Object.fromEntries(
-    await Promise.all(
-      Object.entries(LESSON_EVENT_FIELDS).map(async ([field, event]) => [
-        field,
-        await values(event, "lesson_slug"),
-      ])
-    )
-  ) as Record<string, { name: string; count: number }[]>;
-  const interactionSets = await Promise.all(
-    INTERACTION_EVENTS.map((ev) => values(ev, "lesson_slug"))
-  );
-
-  const events: Record<string, number> = {};
-  for (const r of eventRows) {
-    const name = rowName(r);
-    if (name) events[name] = rowCount(r);
-  }
-
-  const courseViews: Record<string, number> = {};
-  for (const r of courseViewRows) {
-    const slug = aliasCourse(r.name);
-    courseViews[slug] = (courseViews[slug] ?? 0) + r.count;
-  }
-
-  const scenarioSessions: Record<string, number> = {};
-  for (const r of scenarioRows) scenarioSessions[r.name] = r.count;
-
-  // Per-lesson docs — one per lesson that saw any activity this day.
-  const lessons = new Map<string, LessonRollup>();
-  const lessonDoc = (slug: string): LessonRollup => {
-    let doc = lessons.get(slug);
-    if (!doc) {
-      doc = {
-        date,
-        courseSlug: lessonToCourse.get(slug) ?? "unknown",
-        lessonSlug: slug,
-        pageViews: 0,
-        quizCompletes: 0,
-        inlineQuizCompletes: 0,
-        certificates: 0,
-        feedback: 0,
-        interactions: 0,
-      };
-      lessons.set(slug, doc);
-    }
-    return doc;
+    return { countries: toMap(countries), regions: toMap(regions), cities };
   };
-  for (const [field, rows] of Object.entries(lessonValueSets)) {
+
+  const [
+    stats, teacherStats, eventRows, urls,
+    geo, teacherGeo, devices, teacherDevices,
+    userTypesRaw, courseViews,
+    lessonSets, interactionsByLesson, interactionsByPage, interactionsByPageKey,
+    scenarioSessions, scenarioClicks, scenarioResponses, promptRows,
+    inputTokens, outputTokens, responseMsSum,
+  ] = await Promise.all([
+    pool(() => umamiFetch<Record<string, unknown>>("/stats", { startAt, endAt })),
+    pool(() => umamiFetch<Record<string, unknown>>("/stats", { startAt, endAt, tag: "teacher" })),
+    metrics("event"),
+    metrics("url"),
+    geoMaps(),
+    geoMaps("teacher"),
+    metrics("device").then(toMap),
+    metrics("device", { tag: "teacher" }).then(toMap),
+    values("lesson_page_view", "user_type"),
+    values("course_view", "course_slug"),
+    Promise.all(
+      Object.keys(LESSON_EVENT_FIELDS).map(async (ev) => [ev, await values(ev, "lesson_slug")] as const)
+    ),
+    Promise.all(
+      INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "lesson_slug")] as const)
+    ),
+    Promise.all(
+      INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "page_slug")] as const)
+    ),
+    Promise.all(
+      INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "page_key")] as const)
+    ),
+    values("ai_session_start", "session_type"),
+    values("ai_prompt_click", "session_type"),
+    values("ai_prompt_response", "session_type"),
+    values("ai_prompt_click", "prompt_label"),
+    numericSum("input_tokens"),
+    numericSum("output_tokens"),
+    numericSum("response_ms"),
+  ]);
+
+  const events = toMap(eventRows);
+
+  // Historical "authenticated" events were educator accounts whose role read
+  // failed — fold into teacher at write time so reads never re-litigate it.
+  const userTypes: Record<string, number> = {};
+  for (const r of userTypesRaw) {
+    const name = r.name === "authenticated" ? "teacher" : r.name;
+    userTypes[name] = (userTypes[name] ?? 0) + r.count;
+  }
+
+  const courses: Record<string, number> = {};
+  for (const r of courseViews) {
+    const slug = aliasCourse(r.name);
+    courses[slug] = (courses[slug] ?? 0) + r.count;
+  }
+
+  const lessons: Record<string, LessonDay> = {};
+  const lesson = (slug: string): LessonDay =>
+    (lessons[slug] ??= {
+      lessonViews: 0, pageViews: 0, quizCompletes: 0, inlineQuizCompletes: 0,
+      certificates: 0, feedback: 0, interactions: 0, interactionBreakdown: {},
+    });
+  for (const [ev, rows] of lessonSets) {
+    const field = LESSON_EVENT_FIELDS[ev];
+    for (const r of rows) (lesson(r.name)[field] as number) += r.count;
+  }
+  for (const [ev, rows] of interactionsByLesson) {
     for (const r of rows) {
-      const doc = lessonDoc(r.name) as unknown as Record<string, number>;
-      doc[field] += r.count;
+      const l = lesson(r.name);
+      l.interactions += r.count;
+      l.interactionBreakdown[ev] = (l.interactionBreakdown[ev] ?? 0) + r.count;
     }
   }
-  for (const set of interactionSets) {
-    for (const r of set) lessonDoc(r.name).interactions += r.count;
+
+  // Per-page views from URL paths: /courses/{course}/{lesson}/{page}.
+  const pages: Record<string, Record<string, number>> = {};
+  for (const r of urls) {
+    const m = r.name.match(/^\/courses\/[^/]+\/([^/]+)\/([^/?]+)/);
+    if (!m) continue;
+    const byLesson = (pages[m[1]] ??= {});
+    byLesson[m[2]] = (byLesson[m[2]] ?? 0) + r.count;
   }
+
+  const pageInteractions: Record<string, number> = {};
+  for (const [, rows] of interactionsByPage) {
+    for (const r of rows) {
+      pageInteractions[r.name] = (pageInteractions[r.name] ?? 0) + r.count;
+    }
+  }
+  const pageKeyInteractions: Record<string, Record<string, number>> = {};
+  for (const [, rows] of interactionsByPageKey) {
+    for (const r of rows) {
+      const [lessonSlug, pageSlug] = r.name.split("/");
+      if (!lessonSlug || !pageSlug) continue;
+      const byLesson = (pageKeyInteractions[lessonSlug] ??= {});
+      byLesson[pageSlug] = (byLesson[pageSlug] ?? 0) + r.count;
+    }
+  }
+
+  const scenarios: Record<string, LumenSlice> = {};
+  const bumpFlow = (rows: { name: string; count: number }[], key: keyof LumenSlice) => {
+    for (const r of rows) {
+      const s = (scenarios[r.name] ??= { sessions: 0, promptClicks: 0, responses: 0 });
+      s[key] += r.count;
+    }
+  };
+  bumpFlow(scenarioSessions, "sessions");
+  bumpFlow(scenarioClicks, "promptClicks");
+  bumpFlow(scenarioResponses, "responses");
 
   return {
-    day: {
-      date,
-      stats: statBlock(stats),
-      teacherStats: statBlock(teacherStats),
-      events,
-      courseViews,
-      lumen: {
-        sessions: events["ai_session_start"] ?? 0,
-        promptClicks: events["ai_prompt_click"] ?? 0,
-        responses: events["ai_prompt_response"] ?? 0,
-        inputTokens,
-        outputTokens,
-        scenarioSessions,
-      },
+    date,
+    schema: ARCHIVE_SCHEMA,
+    updatedAt: new Date().toISOString(),
+    stats: statBlock(stats),
+    teacherStats: statBlock(teacherStats),
+    events,
+    userTypes,
+    courses,
+    lessons,
+    pages,
+    pageInteractions,
+    pageKeyInteractions,
+    geo,
+    teacherGeo,
+    devices,
+    teacherDevices,
+    lumen: {
+      sessions: events["ai_session_start"] ?? 0,
+      promptClicks: events["ai_prompt_click"] ?? 0,
+      responses: events["ai_prompt_response"] ?? 0,
+      inputTokens,
+      outputTokens,
+      responseMsSum,
+      scenarios,
+      prompts: promptRows,
     },
-    lessons: [...lessons.values()],
   };
+}
+
+// ── bronze: raw event rows per day ───────────────────────────────────────────
+
+type RawEventRow = Record<string, unknown> & { id?: string };
+
+async function fetchRawEvents(date: string, pool: Pool): Promise<RawEventRow[]> {
+  const startAt = dayStartMs(date);
+  const endAt = dayStartMs(nextDay(date)) - 1;
+  const out: RawEventRow[] = [];
+  for (let page = 1; page <= RAW_MAX_PAGES; page++) {
+    const res = await pool(() =>
+      umamiFetch<{ data?: RawEventRow[] } | RawEventRow[]>("/events", {
+        startAt, endAt, page, pageSize: RAW_PAGE_SIZE,
+      })
+    );
+    const rows = Array.isArray(res) ? res : res.data ?? [];
+    out.push(...rows);
+    if (rows.length < RAW_PAGE_SIZE) break;
+  }
+  return out;
+}
+
+// ── sessions upsert ──────────────────────────────────────────────────────────
+
+type UmamiSession = {
+  id: string;
+  firstAt?: string; lastAt?: string;
+  visits?: number; views?: number; events?: number;
+  country?: string | null; region?: string | null; city?: string | null;
+  device?: string | null;
+};
+
+async function fetchSessions(
+  startAt: number,
+  endAt: number,
+  pool: Pool,
+  extra: Record<string, string | number> = {}
+): Promise<UmamiSession[]> {
+  const out: UmamiSession[] = [];
+  for (let page = 1; page <= 50; page++) {
+    const res = await pool(() =>
+      umamiFetch<{ data?: UmamiSession[] } | UmamiSession[]>("/sessions", {
+        startAt, endAt, page, pageSize: 200, ...extra,
+      })
+    );
+    const rows = Array.isArray(res) ? res : res.data ?? [];
+    out.push(...rows);
+    if (rows.length < 200) break;
+  }
+  return out;
+}
+
+async function buildSessions(
+  startAt: number,
+  endAt: number,
+  pool: Pool
+): Promise<ArchiveSession[]> {
+  const [all, tagged] = await Promise.all([
+    fetchSessions(startAt, endAt, pool),
+    fetchSessions(startAt, endAt, pool, { tag: "teacher" }),
+  ]);
+  const teacherIds = new Set(tagged.map((s) => s.id));
+
+  return Promise.all(
+    all.map((s) =>
+      pool(async () => {
+        const teacher = teacherIds.has(s.id);
+        let distinctId: string | null = null;
+        let lessons: string[] = [];
+        if (teacher) {
+          // Only teacher sessions warrant the detail + activity round-trips
+          // (distinct ID and lessons visited power the teacher table).
+          const detail = await umamiFetch<{ distinctId?: string | null }>(
+            `/sessions/${s.id}`,
+            { startAt, endAt }
+          ).catch(() => null);
+          distinctId = detail?.distinctId ?? null;
+          const activity = await umamiFetch<Array<{ urlPath?: string }>>(
+            `/sessions/${s.id}/activity`,
+            { startAt, endAt }
+          ).catch(() => [] as Array<{ urlPath?: string }>);
+          lessons = [
+            ...new Set(
+              activity.flatMap((a) => {
+                const m = a.urlPath?.match(/^\/courses\/[^/]+\/([^/]+)/);
+                return m ? [m[1]] : [];
+              })
+            ),
+          ].sort();
+        }
+        return {
+          id: s.id,
+          firstAt: s.firstAt ?? new Date(startAt).toISOString(),
+          lastAt: s.lastAt ?? s.firstAt ?? new Date(startAt).toISOString(),
+          visits: s.visits ?? 0,
+          views: s.views ?? 0,
+          events: s.events ?? 0,
+          country: s.country ?? null,
+          region: s.region ?? null,
+          city: s.city ?? null,
+          device: s.device ?? null,
+          teacher,
+          distinctId,
+          lessons,
+          updatedAt: new Date().toISOString(),
+        };
+      })
+    )
+  );
 }
 
 // ── the run ──────────────────────────────────────────────────────────────────
@@ -261,9 +421,10 @@ async function buildDay(
 export interface RollupResult {
   dryRun: boolean;
   processed: string[];
-  lessonDocs: number;
+  rawEvents: number;
+  sessionsUpserted: number;
   remainingMissing: number;
-  sample?: { day: DayRollup; lessons: LessonRollup[] };
+  sample?: ArchiveDay;
 }
 
 export async function runRollup(opts: {
@@ -271,7 +432,7 @@ export async function runRollup(opts: {
   maxDays?: number;
 }): Promise<RollupResult> {
   const dryRun = opts.dryRun ?? false;
-  const maxDays = Math.min(opts.maxDays ?? MAX_DAYS_PER_RUN, 60);
+  const maxDays = Math.min(opts.maxDays ?? MAX_DAYS_PER_RUN, 40);
 
   const db = dryRun ? null : await getAdminDb();
   if (!dryRun && !db) {
@@ -280,13 +441,16 @@ export async function runRollup(opts: {
     );
   }
 
-  const today = todaySydney(); // rollup covers full days only: epoch .. yesterday
+  const today = todaySydney(); // full days only: epoch .. yesterday
   const allDays = [...dayRange(ROLLUP_EPOCH, today)];
 
   const existing = new Set<string>();
   if (db) {
-    const snap = await db.collection("analytics_daily").select().get();
-    for (const doc of snap.docs) existing.add(doc.id);
+    const snap = await db.collection(DAYS_COLLECTION).select("schema").get();
+    for (const doc of snap.docs) {
+      // Old-schema docs count as missing so a schema bump self-migrates.
+      if ((doc.data().schema ?? 1) >= ARCHIVE_SCHEMA) existing.add(doc.id);
+    }
   }
 
   const recent = new Set(allDays.slice(-REDO_RECENT_DAYS));
@@ -296,38 +460,60 @@ export async function runRollup(opts: {
   const remainingMissing =
     allDays.filter((d) => !existing.has(d) || recent.has(d)).length - toDo.length;
 
-  const structure = await getCourseStructure();
-  const lessonToCourse = new Map<string, string>();
-  for (const course of structure) {
-    for (const lesson of course.lessons) lessonToCourse.set(lesson.slug, course.slug);
-  }
+  const pool = makePool(12);
+  let rawEvents = 0;
+  let sample: ArchiveDay | undefined;
 
-  const pool = makePool(5);
-  let lessonDocs = 0;
-  let sample: RollupResult["sample"];
-
-  // Days run sequentially (each already fans out ~18 API calls internally).
   for (const date of toDo) {
-    const { day, lessons } = await buildDay(date, lessonToCourse, pool);
-    lessonDocs += lessons.length;
-    if (!sample) sample = { day, lessons };
+    const [day, raw] = await Promise.all([
+      buildDay(date, pool),
+      fetchRawEvents(date, pool),
+    ]);
+    rawEvents += raw.length;
+    if (!sample) sample = day;
     if (db) {
       const batch = db.batch();
-      batch.set(db.collection("analytics_daily").doc(date), {
-        ...day,
+      batch.set(db.collection(DAYS_COLLECTION).doc(date), day);
+      batch.set(db.collection(RAW_COLLECTION).doc(date), {
+        date,
+        count: raw.length,
         updatedAt: new Date().toISOString(),
+        events: raw,
       });
-      for (const lesson of lessons) {
-        batch.set(
-          db
-            .collection("analytics_daily_lessons")
-            .doc(`${date}_${lesson.courseSlug}_${lesson.lessonSlug}`),
-          { ...lesson, updatedAt: new Date().toISOString() }
-        );
+      await batch.commit();
+    }
+  }
+
+  // Sessions: on normal runs upsert the trailing window; when backfilling
+  // (missing days processed), widen to cover everything processed.
+  const oldestProcessed = toDo[0] ?? today;
+  const windowStartDate =
+    oldestProcessed <
+    [...dayRange(ROLLUP_EPOCH, today)].slice(-SESSION_WINDOW_DAYS)[0]
+      ? oldestProcessed
+      : [...dayRange(ROLLUP_EPOCH, today)].slice(-SESSION_WINDOW_DAYS)[0];
+  const sessions = await buildSessions(
+    dayStartMs(windowStartDate),
+    Date.now(),
+    pool
+  );
+  if (db) {
+    // Firestore batches cap at 500 writes.
+    for (let i = 0; i < sessions.length; i += 450) {
+      const batch = db.batch();
+      for (const s of sessions.slice(i, i + 450)) {
+        batch.set(db.collection(SESSIONS_COLLECTION).doc(s.id), s);
       }
       await batch.commit();
     }
   }
 
-  return { dryRun, processed: toDo, lessonDocs, remainingMissing, sample };
+  return {
+    dryRun,
+    processed: toDo,
+    rawEvents,
+    sessionsUpserted: sessions.length,
+    remainingMissing,
+    sample,
+  };
 }

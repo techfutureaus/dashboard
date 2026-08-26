@@ -16,15 +16,22 @@ type FetchState<T> = {
 // Shared chrome for the Umami-backed LMS/Lumen report pages: the Ga4ReportPage
 // equivalent minus the property picker — one Umami website covers the whole
 // LMS (main site + Lumen iframe, separable by hostname inside Umami itself).
+//
+// The header is a sticky banner: the date range (and any page-supplied
+// controls, e.g. the Website page's time-scale picker) stay reachable while
+// scrolling a long report.
 export function UmamiReportPage<T extends { property: UmamiSource }>({
   title,
   subtitleFallback,
   useData,
+  headerControls,
   children,
 }: {
   title: string;
   subtitleFallback: string;
   useData: (range: DateRange) => FetchState<T>;
+  /** Extra controls rendered in the sticky banner next to the date range. */
+  headerControls?: ReactNode;
   children: (data: T, rangeLabel: string) => ReactNode;
 }) {
   const [range, setRange] = useState<DateRange>(defaultRange());
@@ -35,20 +42,25 @@ export function UmamiReportPage<T extends { property: UmamiSource }>({
     !range.start && !range.end ? "All time" : describeRange(range);
 
   return (
-    <div className="p-8 max-w-7xl">
-      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+    <div className="max-w-7xl">
+      <div className="sticky top-0 z-40 bg-gray-50/95 backdrop-blur-sm border-b border-gray-200 px-8 py-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
-          <p className="text-sm text-gray-500">
+          <h1 className="text-xl font-bold text-gray-900">{title}</h1>
+          <p className="text-xs text-gray-500">
             {data?.property.displayName ?? subtitleFallback}
           </p>
         </div>
-        <DateRangeControl value={range} onChange={setRange} />
+        <div className="flex flex-wrap items-center gap-3">
+          {headerControls}
+          <DateRangeControl value={range} onChange={setRange} />
+        </div>
       </div>
 
-      {loading && <div className="text-gray-500">Loading…</div>}
-      {error && <Banner tone="error">{error}</Banner>}
-      {data && children(data, rangeLabel)}
+      <div className="p-8 pt-6">
+        {loading && <div className="text-gray-500">Loading…</div>}
+        {error && <Banner tone="error">{error}</Banner>}
+        {data && children(data, rangeLabel)}
+      </div>
     </div>
   );
 }

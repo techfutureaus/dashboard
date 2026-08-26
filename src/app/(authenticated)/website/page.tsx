@@ -35,13 +35,31 @@ import type {
 import type { NameCount } from "@/lib/umami";
 
 export default function WebsitePage() {
+  // One global time scale, controlled from the sticky banner — every
+  // time-bucketed chart on the page follows it.
+  const [granularity, setGranularity] = useState<Granularity>("day");
   return (
     <UmamiReportPage
       title="TechFutures Website"
       subtitleFallback="Audience, courses, Lumen, and teacher engagement."
       useData={useUmamiWebsite}
+      headerControls={
+        <SegmentedControl
+          value={granularity}
+          onChange={setGranularity}
+          options={[
+            { value: "day", label: "Day" },
+            { value: "week", label: "Week" },
+            { value: "month", label: "Month" },
+            { value: "quarter", label: "Quarter" },
+            { value: "year", label: "Year" },
+          ]}
+        />
+      }
     >
-      {(data, rangeLabel) => <WebsiteBody data={data} rangeLabel={rangeLabel} />}
+      {(data, rangeLabel) => (
+        <WebsiteBody data={data} rangeLabel={rangeLabel} granularity={granularity} />
+      )}
     </UmamiReportPage>
   );
 }
@@ -291,8 +309,15 @@ function SimpleTable({
 
 type Audience = "anonymous" | "teacher";
 
-function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: string }) {
-  const [granularity, setGranularity] = useState<Granularity>("day");
+function WebsiteBody({
+  data,
+  rangeLabel,
+  granularity,
+}: {
+  data: WebsiteReport;
+  rangeLabel: string;
+  granularity: Granularity;
+}) {
   const [geoAudience, setGeoAudience] = useState<Audience>("anonymous");
   const [deviceAudience, setDeviceAudience] = useState<Audience>("anonymous");
   const [deviceView, setDeviceView] = useState<"share" | "monthly">("share");
@@ -353,19 +378,6 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
       </div>
 
       <Section title="Traffic over time" subtitle={rangeLabel} exportData={trend} exportName="website-trend">
-        <div className="mb-3">
-          <SegmentedControl
-            value={granularity}
-            onChange={setGranularity}
-            options={[
-              { value: "day", label: "Day" },
-              { value: "week", label: "Week" },
-              { value: "month", label: "Month" },
-              { value: "quarter", label: "Quarter" },
-              { value: "year", label: "Year" },
-            ]}
-          />
-        </div>
         {trend.length > 0 ? (
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
@@ -414,14 +426,18 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
               onChange={setDeviceView}
               options={[
                 { value: "share", label: "Share" },
-                { value: "monthly", label: "Month by month" },
+                { value: "monthly", label: "Over time" },
               ]}
             />
           </div>
           {deviceView === "share" ? (
             <DonutWithTable rows={devices} />
           ) : (
-            <DeviceMonthly months={data.deviceMonthly} audience={deviceAudience} />
+            <DeviceMonthly
+              months={data.deviceMonthly}
+              audience={deviceAudience}
+              granularity={granularity}
+            />
           )}
         </Section>
       </div>
@@ -470,7 +486,7 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
       <CoursesSection courses={data.courses} />
 
       {/* ── Lumen ──────────────────────────────────────────────────────── */}
-      <LumenSection data={data} rangeLabel={rangeLabel} />
+      <LumenSection data={data} rangeLabel={rangeLabel} granularity={granularity} />
 
       {/* ── Teachers & schools ─────────────────────────────────────────── */}
       <TeachersSection data={data} rangeLabel={rangeLabel} />
@@ -480,7 +496,39 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
 
 // ── devices over time ────────────────────────────────────────────────────────
 
-function DeviceMonthly({ months, audience }: { months: DeviceMonth[]; audience: Audience }) {
+function DeviceMonthly({
+  months: monthsRaw,
+  audience,
+  granularity,
+}: {
+  months: DeviceMonth[];
+  audience: Audience;
+  granularity: Granularity;
+}) {
+  // Device data arrives in monthly buckets — group them up to the global
+  // time scale where that's coarser (quarter/year); day/week show monthly.
+  const months = useMemo(() => {
+    if (granularity !== "quarter" && granularity !== "year") return monthsRaw;
+    const grouped = new Map<string, DeviceMonth>();
+    const merge = (into: NameCount[], from: NameCount[]) => {
+      for (const r of from) {
+        const hit = into.find((x) => x.name === r.name);
+        if (hit) hit.count += r.count;
+        else into.push({ ...r });
+      }
+    };
+    for (const m of monthsRaw) {
+      const [y, mm] = m.month.split("-");
+      const key =
+        granularity === "year" ? y : `${y}-Q${Math.ceil(Number(mm) / 3)}`;
+      const g = grouped.get(key) ?? { month: key, all: [], teacher: [] };
+      merge(g.all, m.all);
+      merge(g.teacher, m.teacher);
+      grouped.set(key, g);
+    }
+    return [...grouped.values()];
+  }, [monthsRaw, granularity]);
+
   const deviceTypes = useMemo(() => {
     const totals = new Map<string, number>();
     for (const m of months) {
@@ -504,7 +552,10 @@ function DeviceMonthly({ months, audience }: { months: DeviceMonth[]; audience: 
             name: r.name,
             count: Math.max(0, r.count - (m.teacher.find((t) => t.name === r.name)?.count ?? 0)),
           }));
-    const row: Record<string, string | number> = { label: fmtMonth(m.month) };
+    const row: Record<string, string | number> = {
+      // Keys are "YYYY-MM", "YYYY-Qn", or "YYYY" depending on the time scale.
+      label: /^\d{4}-\d{2}$/.test(m.month) ? fmtMonth(m.month) : m.month,
+    };
     for (const t of deviceTypes) row[t] = source.find((r) => r.name === t)?.count ?? 0;
     return row;
   });
@@ -841,11 +892,31 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
 
 // ── Lumen ────────────────────────────────────────────────────────────────────
 
-function LumenSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: string }) {
+function LumenSection({
+  data,
+  rangeLabel,
+  granularity,
+}: {
+  data: WebsiteReport;
+  rangeLabel: string;
+  granularity: Granularity;
+}) {
   const scenarioPie = toPie(
     data.lumen.byScenario.map((s) => ({ name: s.scenario, count: s.sessions }))
   );
   const promptPie = toPie(data.lumen.topPrompts, 6);
+  const responsesTrend = useMemo(() => {
+    const buckets = new Map<string, { label: string; Responses: number }>();
+    for (const d of data.lumen.responsesDaily) {
+      const { key, label } = bucketOf(d.date, granularity);
+      const b = buckets.get(key) ?? { label, Responses: 0 };
+      b.Responses += d.count;
+      buckets.set(key, b);
+    }
+    return [...buckets.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, v]) => v);
+  }, [data.lumen.responsesDaily, granularity]);
 
   return (
     <>
@@ -922,15 +993,15 @@ function LumenSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: s
 
       <Section
         title="Lumen responses over time"
-        subtitle={`Daily AI responses · ${rangeLabel}`}
-        exportData={data.lumen.responsesDaily}
+        subtitle={`AI responses · ${rangeLabel}`}
+        exportData={responsesTrend}
         exportName="website-lumen-daily"
       >
-        {data.lumen.responsesDaily.length > 0 ? (
+        {responsesTrend.length > 0 ? (
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
-                data={data.lumen.responsesDaily.map((d) => ({ label: fmtDay(d.date), Responses: d.count }))}
+                data={responsesTrend}
                 margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />

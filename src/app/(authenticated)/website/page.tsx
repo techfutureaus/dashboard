@@ -35,33 +35,25 @@ import type {
 import type { NameCount } from "@/lib/umami";
 
 export default function WebsitePage() {
-  // One global time scale, controlled from the sticky banner — every
-  // time-bucketed chart on the page follows it.
-  const [granularity, setGranularity] = useState<Granularity>("day");
   return (
     <UmamiReportPage
       title="TechFutures Website"
       subtitleFallback="Audience, courses, Lumen, and teacher engagement."
       useData={useUmamiWebsite}
-      headerControls={
-        <SegmentedControl
-          value={granularity}
-          onChange={setGranularity}
-          options={[
-            { value: "day", label: "Day" },
-            { value: "week", label: "Week" },
-            { value: "month", label: "Month" },
-            { value: "quarter", label: "Quarter" },
-            { value: "year", label: "Year" },
-          ]}
-        />
-      }
     >
-      {(data, rangeLabel) => (
-        <WebsiteBody data={data} rangeLabel={rangeLabel} granularity={granularity} />
-      )}
+      {(data, rangeLabel) => <WebsiteBody data={data} rangeLabel={rangeLabel} />}
     </UmamiReportPage>
   );
+}
+
+// The date-range dropdown in the banner is the single time control: the
+// chart bucketing follows the span of data it returns. Short ranges read
+// day by day; longer ones step up so the charts stay legible.
+function autoGranularity(dayCount: number): Granularity {
+  if (dayCount <= 45) return "day";
+  if (dayCount <= 200) return "week";
+  if (dayCount <= 750) return "month";
+  return "quarter";
 }
 
 // ── palette (validated: fixed categorical order, never cycled) ───────────────
@@ -309,15 +301,8 @@ function SimpleTable({
 
 type Audience = "anonymous" | "teacher";
 
-function WebsiteBody({
-  data,
-  rangeLabel,
-  granularity,
-}: {
-  data: WebsiteReport;
-  rangeLabel: string;
-  granularity: Granularity;
-}) {
+function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: string }) {
+  const granularity = autoGranularity(data.audience.daily.length);
   const [geoAudience, setGeoAudience] = useState<Audience>("anonymous");
   const [deviceAudience, setDeviceAudience] = useState<Audience>("anonymous");
   const [deviceView, setDeviceView] = useState<"share" | "monthly">("share");

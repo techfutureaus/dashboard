@@ -27,6 +27,9 @@ import { aliasCourse } from "./course-aliases";
 // - Umami's event-data values endpoint returns at most 100 distinct values,
 //   so token sums are top-100 approximations.
 export const TAG_SINCE = "2026-08-21";
+// When the site started sending the lesson-scoped page_key on events.
+export const PAGE_KEY_SINCE = "2026-08-26";
+const SESSION_SAMPLE = 1000;
 const TIMEZONE = "Australia/Sydney";
 
 // ── shapes ───────────────────────────────────────────────────────────────────
@@ -63,9 +66,12 @@ export interface PageReport {
   slug: string;
   title: string;
   views: number;
-  /** Interaction total attributed by page_slug — null when the slug isn't
-   * unique across lessons (attribution would be ambiguous). */
-  interactions: number | null;
+  /** Interaction total. Unique slugs count the full history via page_slug;
+   * slugs repeated across lessons (introduction/overview) count via the
+   * lesson-scoped page_key the site added on 26 Aug 2026 — exact, but only
+   * from that date. */
+  interactions: number;
+  interactionsSince?: string; // set when the page_key path was used
   lumenFlows: string[];
   lumen: LumenSlice | null; // null when the page embeds no Lumen activity
 }
@@ -139,6 +145,10 @@ export interface WebsiteReport {
     // folded into teacher here.
     eventUserTypes: NameCount[];
     daily: DailyPoint[];
+    // From the sessions API (sampled up to 1000 most recent sessions in
+    // range): how many visitors browsed beyond a single page, and how many
+    // came back for another visit.
+    depth: { sessions: number; multiPage: number; returning: number };
   };
   geography: {
     // "anonymous" is all-visitors minus the teacher-tagged slice, row by row.
@@ -318,14 +328,42 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
 
   // Per-lesson and per-page interaction breakdowns (accordions, reveals,
   // tabs, media, links), keyed by event name so lessons can show the split.
-  const [interactionsByLesson, interactionsByPage] = await Promise.all([
-    Promise.all(
-      INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "lesson_slug")] as const)
-    ),
-    Promise.all(
-      INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "page_slug")] as const)
-    ),
-  ]);
+  // page_key (lesson/page composite, sent since PAGE_KEY_SINCE) disambiguates
+  // the page slugs that repeat across lessons.
+  const [interactionsByLesson, interactionsByPage, interactionsByPageKey] =
+    await Promise.all([
+      Promise.all(
+        INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "lesson_slug")] as const)
+      ),
+      Promise.all(
+        INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "page_slug")] as const)
+      ),
+      Promise.all(
+        INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "page_key")] as const)
+      ),
+    ]);
+
+  // Browse depth from the sessions list (most recent sessions in range,
+  // sampled up to SESSION_SAMPLE): multi-page visitors and return visits.
+  const depth = { sessions: 0, multiPage: 0, returning: 0 };
+  {
+    type SessionRow = { views?: number; visits?: number };
+    const pageSize = 200;
+    for (let page = 1; page <= SESSION_SAMPLE / pageSize; page++) {
+      const res = await pool(() =>
+        umamiFetch<{ data?: SessionRow[] } | SessionRow[]>("/sessions", {
+          startAt, endAt, page, pageSize,
+        })
+      );
+      const rows = Array.isArray(res) ? res : res.data ?? [];
+      for (const s of rows) {
+        depth.sessions++;
+        if ((s.views ?? 0) >= 2) depth.multiPage++;
+        if ((s.visits ?? 0) >= 2) depth.returning++;
+      }
+      if (rows.length < pageSize) break;
+    }
+  }
 
   // Device mix per month, for the devices-over-time view. Month boundaries in
   // report-timezone terms; bounded to the selected range (≤ 13 buckets).
@@ -429,6 +467,12 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
       pageInteractionMap.set(r.name, (pageInteractionMap.get(r.name) ?? 0) + r.count);
     }
   }
+  const pageKeyInteractionMap = new Map<string, number>();
+  for (const [, rows] of interactionsByPageKey) {
+    for (const r of rows) {
+      pageKeyInteractionMap.set(r.name, (pageKeyInteractionMap.get(r.name) ?? 0) + r.count);
+    }
+  }
 
   // Lumen flow → per-scenario stats, and flow locations from the structure.
   const scenarioStats = new Map<string, LumenSlice>();
@@ -485,14 +529,15 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
             });
           }
         }
+        const uniqueSlug = pageSlugOwners.get(p.slug) === 1;
         return {
           slug: p.slug,
           title: p.title,
           views: pageViewsByPath.get(`${course.slug}/${lesson.slug}/${p.slug}`) ?? 0,
-          interactions:
-            pageSlugOwners.get(p.slug) === 1
-              ? pageInteractionMap.get(p.slug) ?? 0
-              : null,
+          interactions: uniqueSlug
+            ? pageInteractionMap.get(p.slug) ?? 0
+            : pageKeyInteractionMap.get(`${lesson.slug}/${p.slug}`) ?? 0,
+          ...(uniqueSlug ? {} : { interactionsSince: PAGE_KEY_SINCE }),
           lumenFlows: p.lumenFlows,
           lumen: sumFlows(p.lumenFlows),
         };
@@ -505,7 +550,7 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
             slug: extra,
             title: `(${extra.replace("-", " ")})`,
             views,
-            interactions: null,
+            interactions: 0,
             lumenFlows: [],
             lumen: null,
           });
@@ -580,6 +625,7 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
       teacher: statBlock(teacherStats),
       eventUserTypes,
       daily: [...daily.values()].sort((a, b) => a.date.localeCompare(b.date)),
+      depth,
     },
     geography: {
       anonymous: {

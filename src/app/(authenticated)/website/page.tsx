@@ -151,25 +151,6 @@ function aggregateTrend(daily: DailyPoint[], g: Granularity) {
     .map(([, v]) => v);
 }
 
-// Teacher share of pageviews per bucket — the growth-proof way to compare the
-// audiences (absolute anonymous volume will always outgrow teachers).
-function shareTrend(daily: DailyPoint[], g: Granularity) {
-  const buckets = new Map<string, { label: string; pv: number; tpv: number }>();
-  for (const d of daily) {
-    const { key, label } = bucketOf(d.date, g);
-    const b = buckets.get(key) ?? { label, pv: 0, tpv: 0 };
-    b.pv += d.pageviews;
-    b.tpv += d.teacherPageviews;
-    buckets.set(key, b);
-  }
-  return [...buckets.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, v]) => ({
-      label: v.label,
-      "Teacher share %": v.pv > 0 ? Math.round((v.tpv / v.pv) * 1000) / 10 : 0,
-    }));
-}
-
 const toPie = (rows: NameCount[], max = 6): NameCount[] => {
   const top = rows.slice(0, max);
   const rest = rows.slice(max).reduce((a, r) => a + r.count, 0);
@@ -191,7 +172,7 @@ function InfoTip({ text }: { text: string }) {
   );
 }
 
-function Donut({ data, height = 220 }: { data: NameCount[]; height?: number }) {
+function Donut({ data, height = 280 }: { data: NameCount[]; height?: number }) {
   if (data.length === 0) return <EmptyHint>No data.</EmptyHint>;
   const total = data.reduce((a, r) => a + r.count, 0);
   return (
@@ -202,8 +183,8 @@ function Donut({ data, height = 220 }: { data: NameCount[]; height?: number }) {
             data={data}
             dataKey="count"
             nameKey="name"
-            innerRadius="55%"
-            outerRadius="85%"
+            innerRadius="58%"
+            outerRadius="92%"
             paddingAngle={2}
             stroke="#ffffff"
             strokeWidth={2}
@@ -221,10 +202,57 @@ function Donut({ data, height = 220 }: { data: NameCount[]; height?: number }) {
               return `${num(n)} (${total > 0 ? Math.round((n / total) * 100) : 0}%)`;
             }}
           />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
         </PieChart>
       </ResponsiveContainer>
     </div>
+  );
+}
+
+function Swatch({ color }: { color: string }) {
+  return (
+    <span
+      className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle shrink-0"
+      style={{ backgroundColor: color }}
+    />
+  );
+}
+
+// The identity legend IS the table: each row carries the swatch matching its
+// slice, so there's no separate (duplicated) legend under the donut.
+const rowColor = (name: string, pie: NameCount[]): string => {
+  const i = pie.findIndex((p) => p.name === name);
+  return i >= 0 && pie[i].name !== "Other" ? sliceColor(i) : OTHER_COLOR;
+};
+
+function DonutWithTable({
+  rows,
+  height,
+  maxRows = 10,
+}: {
+  rows: NameCount[]; // sorted desc; `name` labels slice, tooltip, and row alike
+  height?: number;
+  maxRows?: number;
+}) {
+  const pie = toPie(rows);
+  return (
+    <>
+      <Donut data={pie} height={height} />
+      {rows.length > 0 && (
+        <table className="w-full text-sm mt-3">
+          <tbody>
+            {rows.slice(0, maxRows).map((r) => (
+              <tr key={r.name} className="border-b border-gray-100 last:border-0">
+                <td className="py-1.5 text-gray-700">
+                  <Swatch color={rowColor(r.name, pie)} />
+                  {r.name}
+                </td>
+                <td className="py-1.5 text-right text-gray-900 font-medium">{num(r.count)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }
 
@@ -273,13 +301,13 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
     () => aggregateTrend(data.audience.daily, granularity),
     [data.audience.daily, granularity]
   );
-  const share = useMemo(
-    () => shareTrend(data.audience.daily, granularity === "day" ? "week" : granularity),
-    [data.audience.daily, granularity]
-  );
 
-  const { total, teacher } = data.audience;
+  const { total, teacher, depth } = data.audience;
   const anonymousVisitors = Math.max(0, total.visitors - teacher.visitors);
+  const anonTime = Math.max(0, total.totaltime - teacher.totaltime);
+  const anonVisits = Math.max(0, total.visits - teacher.visits);
+  const pct = (part: number, whole: number) =>
+    whole > 0 ? `${Math.round((part / whole) * 100)}%` : "–";
   const geo = data.geography[geoAudience];
   const devices = data.geography[deviceAudience].devices;
 
@@ -297,12 +325,31 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
   return (
     <>
       {/* ── Audience ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <KpiCard label="Visitors" value={num(total.visitors)} sub={rangeLabel} />
         <KpiCard label="Teachers" value={num(teacher.visitors)} sub="tagged visitors" tone="positive" />
         <KpiCard label="Anonymous" value={num(anonymousVisitors)} sub="mostly students" />
         <KpiCard label="Pageviews" value={num(total.pageviews)} sub={`${num(total.visits)} visits`} />
-        <KpiCard label="Avg time on site" value={fmtDuration(total.totaltime, total.visits)} sub="per visit" />
+        <KpiCard
+          label="Avg time · teachers"
+          value={fmtDuration(teacher.totaltime, teacher.visits)}
+          sub="per visit"
+        />
+        <KpiCard
+          label="Avg time · anonymous"
+          value={fmtDuration(anonTime, anonVisits)}
+          sub="per visit"
+        />
+        <KpiCard
+          label="Viewed 2+ pages"
+          value={pct(depth.multiPage, depth.sessions)}
+          sub={`${num(depth.multiPage)} of ${num(depth.sessions)} visitors`}
+        />
+        <KpiCard
+          label="Returning visitors"
+          value={pct(depth.returning, depth.sessions)}
+          sub="came back for another visit"
+        />
       </div>
 
       <Section title="Traffic over time" subtitle={rangeLabel} exportData={trend} exportName="website-trend">
@@ -346,59 +393,38 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
           exportData={data.audience.eventUserTypes}
           exportName="website-user-types"
         >
-          <Donut data={data.audience.eventUserTypes} />
+          <DonutWithTable
+            rows={data.audience.eventUserTypes.map((r) => ({
+              name: r.name.charAt(0).toUpperCase() + r.name.slice(1),
+              count: r.count,
+            }))}
+          />
         </Section>
 
         <Section
-          title="Teacher share over time"
-          subtitle="Teacher-tagged % of pageviews — stays comparable as anonymous traffic grows"
-          exportData={share}
-          exportName="website-teacher-share"
+          title="Devices"
+          subtitle={deviceAudience === "teacher" ? "Teachers" : "Anonymous visitors"}
+          exportData={devices}
+          exportName={`website-devices-${deviceAudience}`}
         >
-          {share.length > 0 ? (
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={share} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} unit="%" />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="Teacher share %" stroke={PALETTE[1]} strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+          <div className="flex flex-wrap gap-3 mb-4">
+            {audienceToggle(deviceAudience, setDeviceAudience)}
+            <SegmentedControl
+              value={deviceView}
+              onChange={setDeviceView}
+              options={[
+                { value: "share", label: "Share" },
+                { value: "monthly", label: "Month by month" },
+              ]}
+            />
+          </div>
+          {deviceView === "share" ? (
+            <DonutWithTable rows={devices} />
           ) : (
-            <EmptyHint>No pageview data in this range.</EmptyHint>
+            <DeviceMonthly months={data.deviceMonthly} audience={deviceAudience} />
           )}
         </Section>
       </div>
-
-      {/* ── Devices ────────────────────────────────────────────────────── */}
-      <Section
-        title="Devices"
-        subtitle={deviceAudience === "teacher" ? "Teachers" : "Anonymous visitors"}
-        exportData={devices}
-        exportName={`website-devices-${deviceAudience}`}
-      >
-        <div className="flex flex-wrap gap-3 mb-4">
-          {audienceToggle(deviceAudience, setDeviceAudience)}
-          <SegmentedControl
-            value={deviceView}
-            onChange={setDeviceView}
-            options={[
-              { value: "share", label: "Share" },
-              { value: "monthly", label: "Month by month" },
-            ]}
-          />
-        </div>
-        {deviceView === "share" ? (
-          <div className="max-w-md">
-            <Donut data={toPie(devices)} />
-          </div>
-        ) : (
-          <DeviceMonthly months={data.deviceMonthly} audience={deviceAudience} />
-        )}
-      </Section>
 
       {/* ── Geography ──────────────────────────────────────────────────── */}
       <Section
@@ -407,23 +433,36 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
       >
         <div className="mb-4">{audienceToggle(geoAudience, setGeoAudience)}</div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <GeoColumn
-            title="Countries"
-            pie={toPie(geo.countries.map((r) => ({ name: countryName(r.name), count: r.count })))}
-            rows={geo.countries.map((r) => ({
-              name: `${flag(r.name)} ${countryName(r.name)}`,
-              count: r.count,
-            }))}
-          />
-          <GeoColumn
-            title="States / regions"
-            pie={toPie(geo.regions.map((r) => ({ name: regionName(r.name), count: r.count })))}
-            rows={geo.regions.map((r) => ({
-              name: `${flag(r.name.split("-")[0])} ${regionName(r.name)}`,
-              count: r.count,
-            }))}
-          />
-          <GeoColumn title="Cities" pie={toPie(geo.cities)} rows={geo.cities} />
+          <div>
+            <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">
+              Countries
+            </h3>
+            <DonutWithTable
+              rows={geo.countries.map((r) => ({
+                name: `${flag(r.name)} ${countryName(r.name)}`,
+                count: r.count,
+              }))}
+              height={230}
+            />
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">
+              States / regions
+            </h3>
+            <DonutWithTable
+              rows={geo.regions.map((r) => ({
+                name: `${flag(r.name.split("-")[0])} ${regionName(r.name)}`,
+                count: r.count,
+              }))}
+              height={230}
+            />
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">
+              Cities
+            </h3>
+            <DonutWithTable rows={geo.cities} height={230} />
+          </div>
         </div>
       </Section>
 
@@ -493,37 +532,6 @@ function DeviceMonthly({ months, audience }: { months: DeviceMonth[]; audience: 
           ))}
         </BarChart>
       </ResponsiveContainer>
-    </div>
-  );
-}
-
-function GeoColumn({
-  title,
-  pie,
-  rows,
-}: {
-  title: string;
-  pie: NameCount[];
-  rows: NameCount[];
-}) {
-  return (
-    <div>
-      <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">{title}</h3>
-      <Donut data={pie} height={190} />
-      {rows.length > 0 ? (
-        <table className="w-full text-sm mt-3">
-          <tbody>
-            {rows.slice(0, 10).map((r) => (
-              <tr key={r.name} className="border-b border-gray-100 last:border-0">
-                <td className="py-1.5 text-gray-700">{r.name}</td>
-                <td className="py-1.5 text-right text-gray-900 font-medium">{num(r.count)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <EmptyHint>No data.</EmptyHint>
-      )}
     </div>
   );
 }
@@ -700,7 +708,7 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
       : sort.key === "views"
         ? p.views
         : sort.key === "interactions"
-          ? p.interactions ?? -1
+          ? p.interactions
           : p.lumen?.sessions ?? -1;
   const pages = [...numbered].sort((a, b) => (sortValue(a) - sortValue(b)) * sort.dir);
 
@@ -808,7 +816,8 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
                   </td>
                   <td className="py-2 px-2 text-right">{num(p.views)}</td>
                   <td className="py-2 px-2 text-right">
-                    {p.interactions === null ? "—" : num(p.interactions)}
+                    {num(p.interactions)}
+                    {p.interactionsSince && <span className="text-gray-400">*</span>}
                   </td>
                   <td className="py-2 pl-2 text-right">
                     {p.lumen ? num(p.lumen.sessions) : "—"}
@@ -817,11 +826,13 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
               ))}
             </tbody>
           </table>
-          <p className="text-xs text-gray-400 mt-2">
-            &ldquo;—&rdquo; under Interactions means the page&apos;s slug isn&apos;t unique
-            across lessons, so per-page attribution would be ambiguous. Lesson totals above
-            are always exact.
-          </p>
+          {pages.some((p) => p.interactionsSince) && (
+            <p className="text-xs text-gray-400 mt-2">
+              * this page name is shared across lessons, so its interactions are counted
+              from 26 Aug 2026 (when per-lesson page tracking was added). Lesson totals
+              above are always exact.
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -870,7 +881,10 @@ function LumenSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: s
           <SimpleTable
             headers={["Scenario", "Where it lives", "Sessions", "Clicks", "Responses"]}
             rows={data.lumen.byScenario.map((s) => [
-              s.scenario,
+              <span key="n">
+                <Swatch color={rowColor(s.scenario, scenarioPie)} />
+                {s.scenario}
+              </span>,
               s.location ? (
                 <span key="loc">
                   <span className="text-gray-400">L{s.location.lessonNumber} ·</span>{" "}
@@ -895,7 +909,13 @@ function LumenSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: s
           <Donut data={promptPie} />
           <SimpleTable
             headers={["Prompt", "Clicks"]}
-            rows={data.lumen.topPrompts.slice(0, 15).map((p) => [p.name, num(p.count)])}
+            rows={data.lumen.topPrompts.slice(0, 15).map((p) => [
+              <span key="n">
+                <Swatch color={rowColor(p.name, promptPie)} />
+                {p.name}
+              </span>,
+              num(p.count),
+            ])}
           />
         </Section>
       </div>

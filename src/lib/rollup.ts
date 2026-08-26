@@ -424,13 +424,25 @@ export interface RollupResult {
   rawEvents: number;
   sessionsUpserted: number;
   remainingMissing: number;
+  stoppedEarly: boolean; // ran out of time budget; next run continues
+  elapsedMs: number;
   sample?: ArchiveDay;
 }
+
+// Stop starting new work at this point so the function returns cleanly
+// (cache bust + JSON summary) instead of being killed at Vercel's 60s cap.
+// The job is idempotent and detects missing days, so anything unstarted is
+// simply picked up by the next daily run.
+const DEFAULT_BUDGET_MS = 42_000;
 
 export async function runRollup(opts: {
   dryRun?: boolean;
   maxDays?: number;
+  budgetMs?: number;
 }): Promise<RollupResult> {
+  const startedAt = Date.now();
+  const budgetMs = opts.budgetMs ?? DEFAULT_BUDGET_MS;
+  const outOfBudget = () => Date.now() - startedAt > budgetMs;
   const dryRun = opts.dryRun ?? false;
   const maxDays = Math.min(opts.maxDays ?? MAX_DAYS_PER_RUN, 40);
 
@@ -461,10 +473,37 @@ export async function runRollup(opts: {
     allDays.filter((d) => !existing.has(d) || recent.has(d)).length - toDo.length;
 
   const pool = makePool(12);
+
+  // Sessions FIRST: they're the most freshness-sensitive output (the teacher
+  // table), so if the time budget runs out it's a day of aggregates that
+  // waits for the next run, never the teacher data. On normal runs the
+  // window is the trailing week; when backfilling, widen to the oldest day
+  // being processed.
+  const trailingStart = [...dayRange(ROLLUP_EPOCH, today)].slice(-SESSION_WINDOW_DAYS)[0];
+  const oldestToDo = toDo[0] ?? today;
+  const windowStartDate = oldestToDo < trailingStart ? oldestToDo : trailingStart;
+  const sessions = await buildSessions(dayStartMs(windowStartDate), Date.now(), pool);
+  if (db) {
+    // Firestore batches cap at 500 writes.
+    for (let i = 0; i < sessions.length; i += 450) {
+      const batch = db.batch();
+      for (const s of sessions.slice(i, i + 450)) {
+        batch.set(db.collection(SESSIONS_COLLECTION).doc(s.id), s);
+      }
+      await batch.commit();
+    }
+  }
+
   let rawEvents = 0;
   let sample: ArchiveDay | undefined;
+  const processed: string[] = [];
+  let stoppedEarly = false;
 
   for (const date of toDo) {
+    if (outOfBudget()) {
+      stoppedEarly = true;
+      break;
+    }
     const [day, raw] = await Promise.all([
       buildDay(date, pool),
       fetchRawEvents(date, pool),
@@ -482,38 +521,17 @@ export async function runRollup(opts: {
       });
       await batch.commit();
     }
-  }
-
-  // Sessions: on normal runs upsert the trailing window; when backfilling
-  // (missing days processed), widen to cover everything processed.
-  const oldestProcessed = toDo[0] ?? today;
-  const windowStartDate =
-    oldestProcessed <
-    [...dayRange(ROLLUP_EPOCH, today)].slice(-SESSION_WINDOW_DAYS)[0]
-      ? oldestProcessed
-      : [...dayRange(ROLLUP_EPOCH, today)].slice(-SESSION_WINDOW_DAYS)[0];
-  const sessions = await buildSessions(
-    dayStartMs(windowStartDate),
-    Date.now(),
-    pool
-  );
-  if (db) {
-    // Firestore batches cap at 500 writes.
-    for (let i = 0; i < sessions.length; i += 450) {
-      const batch = db.batch();
-      for (const s of sessions.slice(i, i + 450)) {
-        batch.set(db.collection(SESSIONS_COLLECTION).doc(s.id), s);
-      }
-      await batch.commit();
-    }
+    processed.push(date);
   }
 
   return {
     dryRun,
-    processed: toDo,
+    processed,
     rawEvents,
     sessionsUpserted: sessions.length,
-    remainingMissing,
+    remainingMissing: remainingMissing + (toDo.length - processed.length),
+    stoppedEarly,
+    elapsedMs: Date.now() - startedAt,
     sample,
   };
 }

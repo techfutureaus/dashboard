@@ -32,6 +32,11 @@ export async function GET(request: NextRequest) {
     const result = await runRollup({
       dryRun: searchParams.get("dry") === "1",
       maxDays: searchParams.get("days") ? Number(searchParams.get("days")) : undefined,
+      // Local/manual runs can raise the time budget (seconds) — e.g. big
+      // backfills outside Vercel's 60s function cap.
+      budgetMs: searchParams.get("budget")
+        ? Number(searchParams.get("budget")) * 1000
+        : undefined,
     });
     if (!result.dryRun) revalidateTag(TAGS.umamiWebsite, "default");
     // Keep the response light unless a sample is asked for (?sample=1).

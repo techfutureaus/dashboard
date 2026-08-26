@@ -609,7 +609,12 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
   };
 }
 
-export const getWebsiteReport = cached(_getWebsiteReport, "umami-website", {
+// The cache key carries the payload-shape version: Vercel's data cache
+// survives deployments, so an unversioned key can feed a newly-deployed page
+// a stale old-shape payload (seen in prod, Aug 2026 — client crashed reading
+// a field the cached report predated). Bump the suffix whenever
+// WebsiteReport's shape changes; the tag stays stable for cache busting.
+export const getWebsiteReport = cached(_getWebsiteReport, "umami-website-v3", {
   revalidate: 43200,
   tags: [TAGS.umamiWebsite],
 });

@@ -239,7 +239,7 @@ const INTERACTION_EVENTS = [
 
 async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
   const { startAt, endAt } = rangeToMs(range);
-  const pool = makePool(6);
+  const pool = makePool(12);
   const metrics = (type: string, extra: Record<string, string | number> = {}) =>
     pool(() =>
       umamiFetch<XY[]>("/metrics", { type, startAt, endAt, limit: 500, ...extra }).then(
@@ -252,7 +252,50 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
   const values = (event: string, propertyName: string) =>
     pool(() => eventDataValues(range, event, propertyName));
 
+  // Everything below shares the pool, so kicking every phase off up-front
+  // (instead of awaiting them in sequence) lets the pool stay saturated —
+  // this is what keeps a date-range change fast.
   const structurePromise = getCourseStructure();
+  const teachersPromise = buildTeacherSection(range, pool);
+  const interactionsPromise = Promise.all([
+    Promise.all(
+      INTERACTION_EVENTS.map(async (ev) =>
+        [ev, await pool(() => eventDataValues(range, ev, "lesson_slug"))] as const
+      )
+    ),
+    Promise.all(
+      INTERACTION_EVENTS.map(async (ev) =>
+        [ev, await pool(() => eventDataValues(range, ev, "page_slug"))] as const
+      )
+    ),
+    Promise.all(
+      INTERACTION_EVENTS.map(async (ev) =>
+        [ev, await pool(() => eventDataValues(range, ev, "page_key"))] as const
+      )
+    ),
+  ]);
+  const depthPromise = (async () => {
+    type SessionRow = { views?: number; visits?: number };
+    const pageSize = 200;
+    const pages = await Promise.all(
+      Array.from({ length: SESSION_SAMPLE / pageSize }, (_, i) =>
+        pool(() =>
+          umamiFetch<{ data?: SessionRow[] } | SessionRow[]>("/sessions", {
+            startAt, endAt, page: i + 1, pageSize,
+          })
+        ).catch(() => [] as SessionRow[])
+      )
+    );
+    const out = { sessions: 0, multiPage: 0, returning: 0 };
+    for (const res of pages) {
+      for (const s of Array.isArray(res) ? res : res.data ?? []) {
+        out.sessions++;
+        if ((s.views ?? 0) >= 2) out.multiPage++;
+        if ((s.visits ?? 0) >= 2) out.returning++;
+      }
+    }
+    return out;
+  })();
 
   const [
     totalStats,
@@ -326,44 +369,9 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
     pool(() => eventDataSum(range, "ai_prompt_response", "response_ms")),
   ]);
 
-  // Per-lesson and per-page interaction breakdowns (accordions, reveals,
-  // tabs, media, links), keyed by event name so lessons can show the split.
-  // page_key (lesson/page composite, sent since PAGE_KEY_SINCE) disambiguates
-  // the page slugs that repeat across lessons.
   const [interactionsByLesson, interactionsByPage, interactionsByPageKey] =
-    await Promise.all([
-      Promise.all(
-        INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "lesson_slug")] as const)
-      ),
-      Promise.all(
-        INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "page_slug")] as const)
-      ),
-      Promise.all(
-        INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "page_key")] as const)
-      ),
-    ]);
-
-  // Browse depth from the sessions list (most recent sessions in range,
-  // sampled up to SESSION_SAMPLE): multi-page visitors and return visits.
-  const depth = { sessions: 0, multiPage: 0, returning: 0 };
-  {
-    type SessionRow = { views?: number; visits?: number };
-    const pageSize = 200;
-    for (let page = 1; page <= SESSION_SAMPLE / pageSize; page++) {
-      const res = await pool(() =>
-        umamiFetch<{ data?: SessionRow[] } | SessionRow[]>("/sessions", {
-          startAt, endAt, page, pageSize,
-        })
-      );
-      const rows = Array.isArray(res) ? res : res.data ?? [];
-      for (const s of rows) {
-        depth.sessions++;
-        if ((s.views ?? 0) >= 2) depth.multiPage++;
-        if ((s.visits ?? 0) >= 2) depth.returning++;
-      }
-      if (rows.length < pageSize) break;
-    }
-  }
+    await interactionsPromise;
+  const depth = await depthPromise;
 
   // Device mix per month, for the devices-over-time view. Month boundaries in
   // report-timezone terms; bounded to the selected range (≤ 13 buckets).
@@ -401,7 +409,7 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
   );
 
   const structure = await structurePromise;
-  const teachers = await buildTeacherSection(range, pool);
+  const teachers = await teachersPromise;
 
   // Daily series: merge the total and teacher-tagged pageview series by day.
   const daily = new Map<string, DailyPoint>();

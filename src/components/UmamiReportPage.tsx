@@ -11,7 +11,17 @@ type FetchState<T> = {
   data: T | null | undefined;
   loading: boolean;
   error: string | null;
+  refreshing?: boolean;
 };
+
+function Spinner({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={`${className} animate-spin text-violet-600`} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+    </svg>
+  );
+}
 
 // Shared chrome for the Umami-backed LMS/Lumen report pages: the Ga4ReportPage
 // equivalent minus the property picker — one Umami website covers the whole
@@ -35,7 +45,8 @@ export function UmamiReportPage<T extends { property: UmamiSource }>({
   children: (data: T, rangeLabel: string) => ReactNode;
 }) {
   const [range, setRange] = useState<DateRange>(defaultRange());
-  const { data, loading, error } = useData(range);
+  const { data, loading, error, refreshing } = useData(range);
+  const busy = loading || !!refreshing;
   // Unlike the GA4 pages (whose backend caps open ranges at 365 days), the
   // Umami routes treat a missing start as genuinely all-time — label honestly.
   const rangeLabel =
@@ -57,9 +68,37 @@ export function UmamiReportPage<T extends { property: UmamiSource }>({
       </div>
 
       <div className="p-8 pt-6">
-        {loading && <div className="text-gray-500">Loading…</div>}
         {error && <Banner tone="error">{error}</Banner>}
-        {data && children(data, rangeLabel)}
+
+        {!data && busy && (
+          <div className="flex flex-col items-center justify-center gap-3 py-32 text-gray-500">
+            <Spinner className="w-8 h-8" />
+            <p className="text-sm">Loading report…</p>
+          </div>
+        )}
+
+        {data && (
+          <div className="relative">
+            {/* Range/refresh changes keep the previous report visible but
+                blurred, so the page doesn't collapse while new data loads. */}
+            <div
+              className={`transition-[filter,opacity] duration-300 ${
+                busy ? "blur-sm opacity-60 pointer-events-none select-none" : ""
+              }`}
+              aria-busy={busy}
+            >
+              {children(data, rangeLabel)}
+            </div>
+            {busy && (
+              <div className="absolute inset-x-0 top-24 z-10 flex justify-center">
+                <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-full shadow-md px-4 py-2 text-sm text-gray-700">
+                  <Spinner />
+                  Updating…
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

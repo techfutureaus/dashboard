@@ -12,6 +12,9 @@ const SANITY_DATASET = process.env.SANITY_DATASET || "production";
 export interface PageNode {
   slug: string;
   title: string;
+  /** Lumen scenario ids embedded on this page (the `flow=` param of its
+   * embedBlock URLs) — matches Umami's `session_type` event property. */
+  lumenFlows: string[];
 }
 
 export interface LessonNode {
@@ -28,6 +31,9 @@ export interface CourseNode {
 
 // Lesson content is a mix of sections (grouping page references) and direct
 // page references — flattened here into one ordered page list per lesson.
+// Lumen activities are embedded as htmlEmbed blocks (iframe inside rawHtml)
+// in the page's studentContent; embedBlock/url kept as a fallback shape.
+const PAGE_PROJECTION = `{title, "slug": slug.current, "embeds": studentContent[_type in ["htmlEmbed", "embedBlock"]]{"src": coalesce(url, rawHtml)}}`;
 const STRUCTURE_QUERY = `*[_type == "course" && defined(slug.current)]{
   title,
   "slug": slug.current,
@@ -35,15 +41,16 @@ const STRUCTURE_QUERY = `*[_type == "course" && defined(slug.current)]{
     title,
     "slug": slug.current,
     "content": content[]{
-      _type == "section" => {"pages": pages[]->{title, "slug": slug.current}},
-      _type == "reference" => {"page": @->{title, "slug": slug.current}}
+      _type == "section" => {"pages": pages[]->${PAGE_PROJECTION}},
+      _type == "reference" => {"page": @->${PAGE_PROJECTION}}
     }
   }
 }`;
 
+type RawPage = { title?: string; slug?: string; embeds?: Array<{ src?: string | null } | null> };
 type RawContent = {
-  pages?: Array<{ title?: string; slug?: string } | null>;
-  page?: { title?: string; slug?: string } | null;
+  pages?: Array<RawPage | null>;
+  page?: RawPage | null;
 };
 type RawLesson = { title?: string; slug?: string; content?: RawContent[] };
 type RawCourse = { title?: string; slug?: string; lessons?: RawLesson[] };
@@ -71,8 +78,19 @@ export async function getCourseStructure(): Promise<CourseNode[]> {
           pages: (l.content ?? []).flatMap((entry) => {
             const nodes = entry.page ? [entry.page] : entry.pages ?? [];
             return nodes
-              .filter((p): p is { title?: string; slug: string } => !!p?.slug)
-              .map((p) => ({ slug: p.slug, title: p.title ?? p.slug }));
+              .filter((p): p is RawPage & { slug: string } => !!p?.slug)
+              .map((p) => ({
+                slug: p.slug,
+                title: p.title ?? p.slug,
+                lumenFlows: [
+                  ...new Set(
+                    (p.embeds ?? []).flatMap((e) => {
+                      const m = e?.src?.match(/lumenlearn\.ai\/?\?[^"'\s]*?flow=([^&"'\s\\]+)/);
+                      return m ? [decodeURIComponent(m[1])] : [];
+                    })
+                  ),
+                ],
+              }));
           }),
         })),
     }));

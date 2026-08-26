@@ -78,7 +78,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex flex-col w-52 min-h-screen bg-white border-r border-gray-200">
+    <aside className="flex flex-col w-52 h-screen sticky top-0 overflow-y-auto bg-white border-r border-gray-200">
       <div className="px-4 py-5">
         <Link href="/" className="text-lg font-bold text-gray-900">
           TFA Dashboard

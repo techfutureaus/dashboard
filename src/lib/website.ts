@@ -53,26 +53,58 @@ export interface GeoBreakdown {
   devices: NameCount[];
 }
 
+export interface LumenSlice {
+  sessions: number;
+  promptClicks: number;
+  responses: number;
+}
+
+export interface PageReport {
+  slug: string;
+  title: string;
+  views: number;
+  /** Interaction total attributed by page_slug — null when the slug isn't
+   * unique across lessons (attribution would be ambiguous). */
+  interactions: number | null;
+  lumenFlows: string[];
+  lumen: LumenSlice | null; // null when the page embeds no Lumen activity
+}
+
 export interface LessonReport {
   slug: string;
   title: string;
+  number: number; // 1-based position in the CMS lesson order
+  lessonViews: number;
   pageViews: number;
   interactions: number;
+  interactionBreakdown: Record<string, number>; // per interaction event
   quizCompletes: number;
   inlineQuizCompletes: number;
   certificates: number;
   feedback: number;
-  pages: { slug: string; title: string; views: number }[];
+  lumen: LumenSlice | null; // summed over the lesson's embedded Lumen flows
+  pages: PageReport[];
 }
 
 export interface CourseReport {
   slug: string;
   title: string;
   courseViews: number;
+  lessonViews: number;
   lessonPageViews: number;
+  interactions: number;
   quizCompletes: number;
+  inlineQuizCompletes: number;
   certificates: number;
+  feedback: number;
+  lumen: LumenSlice;
   lessons: LessonReport[];
+}
+
+export interface DeviceMonth {
+  month: string; // YYYY-MM
+  all: NameCount[];
+  teacher: NameCount[];
 }
 
 export interface TeacherRow {
@@ -102,13 +134,18 @@ export interface WebsiteReport {
   audience: {
     total: StatBlock;
     teacher: StatBlock; // tag-filtered — only meaningful from tagSince
-    eventUserTypes: NameCount[]; // full-history split via lesson_page_view
+    // Full-history split via lesson_page_view user_type. Historical
+    // "authenticated" events (pre-collapse, always educator accounts) are
+    // folded into teacher here.
+    eventUserTypes: NameCount[];
     daily: DailyPoint[];
   };
   geography: {
-    all: GeoBreakdown;
+    // "anonymous" is all-visitors minus the teacher-tagged slice, row by row.
+    anonymous: GeoBreakdown;
     teacher: GeoBreakdown;
   };
+  deviceMonthly: DeviceMonth[];
   courses: CourseReport[];
   lumen: {
     sessions: number;
@@ -119,7 +156,14 @@ export interface WebsiteReport {
     totalTokens: number;
     avgTokensPerResponse: number;
     avgResponseMs: number;
-    byScenario: { scenario: string; sessions: number; promptClicks: number; responses: number }[];
+    byScenario: {
+      scenario: string;
+      sessions: number;
+      promptClicks: number;
+      responses: number;
+      // Where this scenario is embedded in course content (from Sanity).
+      location: { lessonTitle: string; lessonNumber: number; pageTitle: string } | null;
+    }[];
     topPrompts: NameCount[];
     responsesDaily: { date: string; count: number }[];
   };
@@ -216,9 +260,10 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
     urls,
     counts,
     series,
-    userTypes,
+    userTypesRaw,
     courseViewsBySlug,
-    lessonViews,
+    lessonViewEvents,
+    lessonPageViewEvents,
     lessonQuiz,
     lessonInlineQuiz,
     lessonCerts,
@@ -256,6 +301,7 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
     pool(() => eventSeries(range)),
     values("lesson_page_view", "user_type"),
     values("course_view", "course_slug"),
+    values("lesson_view", "lesson_slug"),
     values("lesson_page_view", "lesson_slug"),
     values("quiz_complete", "lesson_slug"),
     values("inline_quiz_complete", "lesson_slug"),
@@ -270,9 +316,50 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
     pool(() => eventDataSum(range, "ai_prompt_response", "response_ms")),
   ]);
 
-  // Per-lesson interaction totals (accordions, reveals, tabs, media, links).
-  const interactionSets = await Promise.all(
-    INTERACTION_EVENTS.map((ev) => values(ev, "lesson_slug"))
+  // Per-lesson and per-page interaction breakdowns (accordions, reveals,
+  // tabs, media, links), keyed by event name so lessons can show the split.
+  const [interactionsByLesson, interactionsByPage] = await Promise.all([
+    Promise.all(
+      INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "lesson_slug")] as const)
+    ),
+    Promise.all(
+      INTERACTION_EVENTS.map(async (ev) => [ev, await values(ev, "page_slug")] as const)
+    ),
+  ]);
+
+  // Device mix per month, for the devices-over-time view. Month boundaries in
+  // report-timezone terms; bounded to the selected range (≤ 13 buckets).
+  const months: string[] = [];
+  {
+    const first = new Date(startAt);
+    const cursor = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
+    while (cursor.getTime() <= endAt && months.length < 13) {
+      months.push(cursor.toISOString().slice(0, 7));
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    }
+  }
+  const deviceMonthly: DeviceMonth[] = await Promise.all(
+    months.map(async (month) => {
+      const mStart = Math.max(new Date(`${month}-01T00:00:00+10:00`).getTime(), startAt);
+      const next = new Date(`${month}-01T00:00:00+10:00`);
+      next.setUTCMonth(next.getUTCMonth() + 1);
+      const mEnd = Math.min(next.getTime() - 1, endAt);
+      const monthMetric = (extra: Record<string, string | number> = {}) =>
+        pool(() =>
+          umamiFetch<XY[]>("/metrics", {
+            type: "device", startAt: mStart, endAt: mEnd, limit: 20, ...extra,
+          }).then((rows) =>
+            rows
+              .map((r) => ({ name: String(xyName(r)), count: xyCount(r) }))
+              .filter((r) => r.name !== "")
+          )
+        );
+      const [all, teacher] = await Promise.all([
+        monthMetric(),
+        monthMetric({ tag: "teacher" }),
+      ]);
+      return { month, all, teacher };
+    })
   );
 
   const structure = await structurePromise;
@@ -302,7 +389,8 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
   // Courses: Sanity structure decorated with Umami numbers. Lesson slugs are
   // globally unique, so per-lesson event values can be attached directly.
   const asMap = (rows: NameCount[]) => new Map(rows.map((r) => [r.name, r.count]));
-  const lessonViewMap = asMap(lessonViews);
+  const lessonViewMap = asMap(lessonViewEvents);
+  const lessonPageViewMap = asMap(lessonPageViewEvents);
   const quizMap = asMap(lessonQuiz);
   const inlineQuizMap = asMap(lessonInlineQuiz);
   const certMap = asMap(lessonCerts);
@@ -312,12 +400,66 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
     const slug = aliasCourse(r.name);
     courseViewMap.set(slug, (courseViewMap.get(slug) ?? 0) + r.count);
   }
+
+  // Interaction totals + per-event breakdowns, by lesson slug.
   const interactionMap = new Map<string, number>();
-  for (const set of interactionSets) {
-    for (const r of set) {
+  const interactionDetail = new Map<string, Record<string, number>>();
+  for (const [event, rows] of interactionsByLesson) {
+    for (const r of rows) {
       interactionMap.set(r.name, (interactionMap.get(r.name) ?? 0) + r.count);
+      const detail = interactionDetail.get(r.name) ?? {};
+      detail[event] = (detail[event] ?? 0) + r.count;
+      interactionDetail.set(r.name, detail);
     }
   }
+
+  // Per-page interactions — attributable only where the page slug is unique
+  // across all lessons (page_slug is the only key the events carry).
+  const pageSlugOwners = new Map<string, number>();
+  for (const course of structure) {
+    for (const lesson of course.lessons) {
+      for (const p of lesson.pages) {
+        pageSlugOwners.set(p.slug, (pageSlugOwners.get(p.slug) ?? 0) + 1);
+      }
+    }
+  }
+  const pageInteractionMap = new Map<string, number>();
+  for (const [, rows] of interactionsByPage) {
+    for (const r of rows) {
+      pageInteractionMap.set(r.name, (pageInteractionMap.get(r.name) ?? 0) + r.count);
+    }
+  }
+
+  // Lumen flow → per-scenario stats, and flow locations from the structure.
+  const scenarioStats = new Map<string, LumenSlice>();
+  const bumpFlow = (rows: NameCount[], key: keyof LumenSlice) => {
+    for (const r of rows) {
+      const s =
+        scenarioStats.get(r.name) ?? { sessions: 0, promptClicks: 0, responses: 0 };
+      s[key] += r.count;
+      scenarioStats.set(r.name, s);
+    }
+  };
+  bumpFlow(lumenSessionsByScenario, "sessions");
+  bumpFlow(lumenClicksByScenario, "promptClicks");
+  bumpFlow(lumenResponsesByScenario, "responses");
+  const sumFlows = (flows: string[]): LumenSlice | null => {
+    if (flows.length === 0) return null;
+    const out = { sessions: 0, promptClicks: 0, responses: 0 };
+    for (const f of flows) {
+      const s = scenarioStats.get(f);
+      if (s) {
+        out.sessions += s.sessions;
+        out.promptClicks += s.promptClicks;
+        out.responses += s.responses;
+      }
+    }
+    return out;
+  };
+  const flowLocation = new Map<
+    string,
+    { lessonTitle: string; lessonNumber: number; pageTitle: string }
+  >();
 
   // Per-page views from URL metrics: /courses/{course}/{lesson}/{page}.
   const pageViewsByPath = new Map<string, number>();
@@ -329,59 +471,103 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
   }
 
   const courses: CourseReport[] = structure.map((course: CourseNode) => {
-    const lessons: LessonReport[] = course.lessons.map((lesson) => {
-      const pages = lesson.pages.map((p) => ({
-        slug: p.slug,
-        title: p.title,
-        views: pageViewsByPath.get(`${course.slug}/${lesson.slug}/${p.slug}`) ?? 0,
-      }));
+    const lessons: LessonReport[] = course.lessons.map((lesson, lessonIndex) => {
+      const lessonNumber = lessonIndex + 1;
+      const lessonFlows: string[] = [];
+      const pages: PageReport[] = lesson.pages.map((p) => {
+        lessonFlows.push(...p.lumenFlows);
+        for (const f of p.lumenFlows) {
+          if (!flowLocation.has(f)) {
+            flowLocation.set(f, {
+              lessonTitle: lesson.title,
+              lessonNumber,
+              pageTitle: p.title,
+            });
+          }
+        }
+        return {
+          slug: p.slug,
+          title: p.title,
+          views: pageViewsByPath.get(`${course.slug}/${lesson.slug}/${p.slug}`) ?? 0,
+          interactions:
+            pageSlugOwners.get(p.slug) === 1
+              ? pageInteractionMap.get(p.slug) ?? 0
+              : null,
+          lumenFlows: p.lumenFlows,
+          lumen: sumFlows(p.lumenFlows),
+        };
+      });
       // Quiz + teacher-overview pages live at fixed paths outside the CMS page list.
       for (const extra of ["quiz", "teacher-overview"]) {
         const views = pageViewsByPath.get(`${course.slug}/${lesson.slug}/${extra}`);
-        if (views) pages.push({ slug: extra, title: `(${extra.replace("-", " ")})`, views });
+        if (views) {
+          pages.push({
+            slug: extra,
+            title: `(${extra.replace("-", " ")})`,
+            views,
+            interactions: null,
+            lumenFlows: [],
+            lumen: null,
+          });
+        }
       }
       return {
         slug: lesson.slug,
         title: lesson.title,
-        pageViews: lessonViewMap.get(lesson.slug) ?? 0,
+        number: lessonNumber,
+        lessonViews: lessonViewMap.get(lesson.slug) ?? 0,
+        pageViews: lessonPageViewMap.get(lesson.slug) ?? 0,
         interactions: interactionMap.get(lesson.slug) ?? 0,
+        interactionBreakdown: interactionDetail.get(lesson.slug) ?? {},
         quizCompletes: quizMap.get(lesson.slug) ?? 0,
         inlineQuizCompletes: inlineQuizMap.get(lesson.slug) ?? 0,
         certificates: certMap.get(lesson.slug) ?? 0,
         feedback: feedbackMap.get(lesson.slug) ?? 0,
+        lumen: sumFlows([...new Set(lessonFlows)]),
         pages,
       };
     });
+    const sum = (f: (l: LessonReport) => number) =>
+      lessons.reduce((a, l) => a + f(l), 0);
     return {
       slug: course.slug,
       title: course.title,
       courseViews: courseViewMap.get(course.slug) ?? 0,
-      lessonPageViews: lessons.reduce((a, l) => a + l.pageViews, 0),
-      quizCompletes: lessons.reduce((a, l) => a + l.quizCompletes, 0),
-      certificates: lessons.reduce((a, l) => a + l.certificates, 0),
+      lessonViews: sum((l) => l.lessonViews),
+      lessonPageViews: sum((l) => l.pageViews),
+      interactions: sum((l) => l.interactions),
+      quizCompletes: sum((l) => l.quizCompletes),
+      inlineQuizCompletes: sum((l) => l.inlineQuizCompletes),
+      certificates: sum((l) => l.certificates),
+      feedback: sum((l) => l.feedback),
+      lumen: {
+        sessions: sum((l) => l.lumen?.sessions ?? 0),
+        promptClicks: sum((l) => l.lumen?.promptClicks ?? 0),
+        responses: sum((l) => l.lumen?.responses ?? 0),
+      },
       lessons,
     };
   });
 
-  // Lumen
-  const scenarios = new Map<
-    string,
-    { sessions: number; promptClicks: number; responses: number }
-  >();
-  const bumpScenario = (
-    rows: NameCount[],
-    key: "sessions" | "promptClicks" | "responses"
-  ) => {
-    for (const r of rows) {
-      const entry =
-        scenarios.get(r.name) ?? { sessions: 0, promptClicks: 0, responses: 0 };
-      entry[key] += r.count;
-      scenarios.set(r.name, entry);
-    }
+  // Historical "authenticated" events were always educator accounts whose
+  // role read failed (the site stopped emitting the bucket on 21 Aug) — fold
+  // them into teacher so the split isn't misleading.
+  const userTypeMap = new Map<string, number>();
+  for (const r of userTypesRaw) {
+    const name = r.name === "authenticated" ? "teacher" : r.name;
+    userTypeMap.set(name, (userTypeMap.get(name) ?? 0) + r.count);
+  }
+  const eventUserTypes = [...userTypeMap.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  // Anonymous slice = everyone minus the teacher-tagged rows, per value.
+  const minus = (all: NameCount[], teacher: NameCount[]): NameCount[] => {
+    const t = new Map(teacher.map((r) => [r.name, r.count]));
+    return all
+      .map((r) => ({ name: r.name, count: Math.max(0, r.count - (t.get(r.name) ?? 0)) }))
+      .filter((r) => r.count > 0);
   };
-  bumpScenario(lumenSessionsByScenario, "sessions");
-  bumpScenario(lumenClicksByScenario, "promptClicks");
-  bumpScenario(lumenResponsesByScenario, "responses");
 
   const responses = counts.get("ai_prompt_response") ?? 0;
   const totalTokens = lumenInput + lumenOutput;
@@ -392,11 +578,16 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
     audience: {
       total: statBlock(totalStats),
       teacher: statBlock(teacherStats),
-      eventUserTypes: userTypes.sort((a, b) => b.count - a.count),
+      eventUserTypes,
       daily: [...daily.values()].sort((a, b) => a.date.localeCompare(b.date)),
     },
     geography: {
-      all: { countries, regions, cities, devices },
+      anonymous: {
+        countries: minus(countries, tCountries),
+        regions: minus(regions, tRegions),
+        cities: minus(cities, tCities),
+        devices: minus(devices, tDevices),
+      },
       teacher: {
         countries: tCountries,
         regions: tRegions,
@@ -404,6 +595,7 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
         devices: tDevices,
       },
     },
+    deviceMonthly,
     courses,
     lumen: {
       sessions: counts.get("ai_session_start") ?? 0,
@@ -414,8 +606,12 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
       totalTokens,
       avgTokensPerResponse: responses > 0 ? Math.round(totalTokens / responses) : 0,
       avgResponseMs: responses > 0 ? Math.round(lumenResponseMsSum / responses) : 0,
-      byScenario: [...scenarios.entries()]
-        .map(([scenario, v]) => ({ scenario, ...v }))
+      byScenario: [...scenarioStats.entries()]
+        .map(([scenario, v]) => ({
+          scenario,
+          ...v,
+          location: flowLocation.get(scenario) ?? null,
+        }))
         .sort((a, b) => b.sessions - a.sessions),
       topPrompts: lumenPrompts.sort((a, b) => b.count - a.count).slice(0, 25),
       responsesDaily: series.get("ai_prompt_response") ?? [],

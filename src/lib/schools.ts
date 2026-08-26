@@ -36,17 +36,19 @@ export async function getSchoolsByAnalyticsId(
 
   await Promise.all(
     chunks.map(async (chunk) => {
+      // School lives on the signup profile sub-object, not the doc root.
       const snap = await db
         .collection("users")
         .where("analyticsId", "in", chunk)
-        .select("analyticsId", "school", "schoolId")
+        .select("analyticsId", "profile.school", "profile.schoolId")
         .get();
       for (const doc of snap.docs) {
         const d = doc.data();
+        const profile = (d.profile ?? {}) as Record<string, unknown>;
         if (typeof d.analyticsId === "string") {
           out.set(d.analyticsId, {
-            school: typeof d.school === "string" ? d.school : null,
-            schoolId: typeof d.schoolId === "string" ? d.schoolId : null,
+            school: typeof profile.school === "string" ? profile.school : null,
+            schoolId: typeof profile.schoolId === "string" ? profile.schoolId : null,
           });
         }
       }

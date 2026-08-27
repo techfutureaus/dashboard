@@ -54,7 +54,7 @@ export function UmamiReportPage<T extends { property: UmamiSource }>({
 
   return (
     <div className="max-w-7xl">
-      <div className="sticky top-0 z-40 bg-gray-50/95 backdrop-blur-sm border-b border-gray-200 px-8 py-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="sticky top-12 md:top-0 z-40 bg-gray-50/95 backdrop-blur-sm border-b border-gray-200 px-8 py-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900">{title}</h1>
           <p className="text-xs text-gray-500">{subtitleFallback}</p>

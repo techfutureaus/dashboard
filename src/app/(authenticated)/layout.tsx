@@ -9,7 +9,7 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
       {/* No overflow-auto here: the window is the scroll container, and an
           overflow context on main would break sticky descendants (the report
           pages' sticky banner). min-w-0 keeps wide tables shrinkable. */}
-      <main className="flex-1 min-w-0">{children}</main>
+      <main className="flex-1 min-w-0 pt-12 md:pt-0">{children}</main>
     </div>
   );
 }

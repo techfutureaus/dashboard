@@ -231,34 +231,71 @@ const rowColor = (name: string, pie: NameCount[]): string => {
 function DonutWithTable({
   rows,
   height,
-  maxRows = 10,
   pieMax = 6,
 }: {
   rows: NameCount[]; // sorted desc; `name` labels slice, tooltip, and row alike
   height?: number;
-  maxRows?: number;
   /** Colored slices before folding into "Other" — e.g. 9 for the states
    * column so every Australian state keeps its own color. */
   pieMax?: number;
 }) {
   const pie = toPie(rows, pieMax);
+  const [sort, setSort] = useState<{ key: "name" | "count"; dir: 1 | -1 }>({
+    key: "count",
+    dir: -1,
+  });
+  const [page, setPage] = useState(0);
+  const sorted = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const cmp = sort.key === "name" ? a.name.localeCompare(b.name) : a.count - b.count;
+      return cmp * sort.dir;
+    });
+  }, [rows, sort]);
+  const pageRows = sorted.slice(page * 15, (page + 1) * 15);
+  const header = (label: string, key: "name" | "count") => (
+    <button
+      onClick={() => {
+        setSort((s0) =>
+          s0.key === key
+            ? { key, dir: (s0.dir * -1) as 1 | -1 }
+            : { key, dir: key === "name" ? 1 : -1 }
+        );
+        setPage(0);
+      }}
+      className={`uppercase tracking-wide text-[10px] font-semibold whitespace-nowrap ${
+        key === "name" ? "text-left" : "text-right w-full"
+      } ${sort.key === key ? "text-violet-700" : "text-gray-400 hover:text-gray-700"}`}
+    >
+      {label}
+      {sort.key === key ? (sort.dir === -1 ? " ↓" : " ↑") : ""}
+    </button>
+  );
   return (
     <>
       <Donut data={pie} height={height} />
       {rows.length > 0 && (
-        <table className="w-full text-sm mt-3">
-          <tbody>
-            {rows.slice(0, maxRows).map((r) => (
-              <tr key={r.name} className="border-b border-gray-100 last:border-0">
-                <td className="py-1.5 text-gray-700">
-                  <Swatch color={rowColor(r.name, pie)} />
-                  {r.name}
-                </td>
-                <td className="py-1.5 text-right text-gray-900 font-medium">{num(r.count)}</td>
+        <>
+          <table className="w-full text-sm mt-3">
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="py-1">{header("Name", "name")}</th>
+                <th className="py-1 text-right">{header("Count", "count")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {pageRows.map((r) => (
+                <tr key={r.name} className="border-b border-gray-100 last:border-0">
+                  <td className="py-1.5 text-gray-700">
+                    <Swatch color={rowColor(r.name, pie)} />
+                    {r.name}
+                  </td>
+                  <td className="py-1.5 text-right text-gray-900 font-medium">{num(r.count)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Pager page={page} setPage={setPage} total={rows.length} perPage={15} />
+        </>
       )}
     </>
   );
@@ -273,7 +310,7 @@ function SimpleTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[560px]">
+      <table className="w-full text-sm min-w-[320px]">
         <thead>
           <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-200">
             {headers.map((h, i) => (
@@ -693,6 +730,8 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
           ? p.interactions
           : p.lumen?.sessions ?? -1;
   const pages = [...numbered].sort((a, b) => (sortValue(a) - sortValue(b)) * sort.dir);
+  const [pagePage, setPagePage] = useState(0);
+  const visiblePages = pages.slice(pagePage * 15, (pagePage + 1) * 15);
 
   const header = (label: string, key: PageSortKey, left = false) => (
     <button
@@ -828,7 +867,7 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
               </tr>
             </thead>
             <tbody>
-              {pages.map((p) => (
+              {visiblePages.map((p) => (
                 <tr key={p.slug} className="border-b border-gray-100 last:border-0">
                   <td className="py-2 pr-2 text-gray-800">
                     <span className="text-gray-400 mr-1.5">{p.index}.</span>
@@ -850,6 +889,7 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
               ))}
             </tbody>
           </table>
+          <Pager page={pagePage} setPage={setPagePage} total={pages.length} perPage={15} />
         </div>
       </div>
     </div>
@@ -857,6 +897,116 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
 }
 
 // ── Lumen ────────────────────────────────────────────────────────────────────
+
+
+type ColumnDef<T> = {
+  label: string;
+  left?: boolean;
+  nowrap?: boolean;
+  /** Value to sort by; omit to make the column unsortable. */
+  sort?: (row: T) => number | string;
+  render: (row: T) => React.ReactNode;
+};
+
+const TABLE_PAGE_SIZE = 15;
+
+// Every numeric table on the page: sortable headings, capped at 15 rows with
+// a pager so long lists never blow the layout out.
+function DataTable<T>({
+  cols,
+  rows,
+  rowKey,
+  defaultSort,
+  minWidth = 560,
+}: {
+  cols: ColumnDef<T>[];
+  rows: T[];
+  rowKey: (row: T) => string;
+  /** [column index, direction] applied before any user click. */
+  defaultSort?: [number, 1 | -1];
+  minWidth?: number;
+}) {
+  const [sort, setSort] = useState<{ i: number; dir: 1 | -1 } | null>(
+    defaultSort ? { i: defaultSort[0], dir: defaultSort[1] } : null
+  );
+  const [page, setPage] = useState(0);
+
+  const sorted = useMemo(() => {
+    if (!sort) return rows;
+    const col = cols[sort.i];
+    if (!col?.sort) return rows;
+    return [...rows].sort((a, b) => {
+      const av = col.sort!(a);
+      const bv = col.sort!(b);
+      const cmp = typeof av === "number" && typeof bv === "number"
+        ? av - bv
+        : String(av).localeCompare(String(bv));
+      return cmp * sort.dir;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, sort]);
+  const pageRows = sorted.slice(page * TABLE_PAGE_SIZE, (page + 1) * TABLE_PAGE_SIZE);
+
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm" style={{ minWidth }}>
+          <thead>
+            <tr className="border-b border-gray-200">
+              {cols.map((c, i) => (
+                <th key={i} className={`py-2 ${i === 0 ? "pr-3" : "px-2"}`}>
+                  {c.sort ? (
+                    <button
+                      onClick={() => {
+                        setSort((cur) =>
+                          cur?.i === i
+                            ? { i, dir: (cur.dir * -1) as 1 | -1 }
+                            : { i, dir: typeof c.sort!(rows[0] ?? ({} as T)) === "string" ? 1 : -1 }
+                        );
+                        setPage(0);
+                      }}
+                      className={`w-full uppercase tracking-wide text-xs font-semibold whitespace-nowrap ${
+                        c.left ? "text-left" : "text-center"
+                      } ${sort?.i === i ? "text-violet-700" : "text-gray-500 hover:text-gray-800"}`}
+                    >
+                      {c.label}
+                      {sort?.i === i ? (sort.dir === -1 ? " ↓" : " ↑") : ""}
+                    </button>
+                  ) : (
+                    <span
+                      className={`block uppercase tracking-wide text-xs font-semibold text-gray-500 whitespace-nowrap ${
+                        c.left ? "text-left" : "text-center"
+                      }`}
+                    >
+                      {c.label}
+                    </span>
+                  )}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {pageRows.map((row) => (
+              <tr key={rowKey(row)} className="border-b border-gray-100 last:border-0 align-top">
+                {cols.map((c, i) => (
+                  <td
+                    key={i}
+                    className={`py-2 ${i === 0 ? "pr-3" : "px-2"} text-gray-700 ${
+                      c.left ? "text-left" : "text-center"
+                    } ${c.nowrap ? "whitespace-nowrap" : ""}`}
+                  >
+                    {c.render(row)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager page={page} setPage={setPage} total={rows.length} perPage={TABLE_PAGE_SIZE} />
+    </>
+  );
+}
 
 type ScenarioSortKey = "sessions" | "promptClicks" | "responses" | null;
 
@@ -916,7 +1066,7 @@ function LumenSection({
   const [scenarioSort, setScenarioSort] = useState<ScenarioSortKey>(null);
   const [scenarioPage, setScenarioPage] = useState(0);
   const [promptPage, setPromptPage] = useState(0);
-  const SCENARIOS_PER_PAGE = 10;
+  const SCENARIOS_PER_PAGE = 15;
   const PROMPTS_PER_PAGE = 15;
 
   const sortedScenarios = useMemo(() => {
@@ -1177,6 +1327,14 @@ function TeachersSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel
     t.totalVisits > 0
       ? (t.rows.reduce((a, r) => a + r.views, 0) / t.totalVisits).toFixed(1)
       : "–";
+  // Lesson slugs → "L3 · Trust and AI" style labels for the hover list.
+  const lessonLabels = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const course of data.courses) {
+      for (const l of course.lessons) m.set(l.slug, `L${l.number} · ${l.title}`);
+    }
+    return m;
+  }, [data.courses]);
 
   return (
     <>
@@ -1186,16 +1344,24 @@ function TeachersSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel
           text="Teachers are pseudonymous — random codes plus their school, never names. A small number of teacher sessions can't be matched to a code (the visit ended before the identity call landed)."
         />
       </h2>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <KpiCard label="Active teachers" value={num(t.identifiedTeachers)} sub={rangeLabel} />
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
         <KpiCard
-          label="Returning teachers"
-          value={num(t.returningTeachers)}
-          sub="came back more than once"
-          tone="positive"
+          label="Unique teachers"
+          value={num(t.identifiedTeachers)}
+          sub={rangeLabel}
+          info="Distinct teacher accounts seen in this range."
         />
-        <KpiCard label="Total teacher visits" value={num(t.totalVisits)} />
-        <KpiCard label="Pages per visit" value={pagesPerVisit} sub="teacher average" />
+        <KpiCard
+          label="Total teacher visits"
+          value={num(t.totalVisits)}
+          info="Separate visits across all teachers — one teacher returning three times counts as three."
+        />
+        <KpiCard
+          label="Pages per visit"
+          value={pagesPerVisit}
+          sub="teacher average"
+          info="Average pages a teacher views in a single visit."
+        />
       </div>
 
       {!t.schoolsJoined && (
@@ -1210,18 +1376,25 @@ function TeachersSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel
           title="Schools"
           subtitle={rangeLabel}
           info="Teacher activity aggregated by the school recorded at signup."
-          exportData={t.schools.map((s) => ({ ...s }))}
+          exportData={t.schools.map((sc) => ({ ...sc }))}
           exportName="website-schools"
         >
-          <SimpleTable
-            headers={["School", "Teachers", "Visits", "Views", "Last seen"]}
-            rows={t.schools.map((s) => [
-              s.school,
-              num(s.teachers),
-              num(s.visits),
-              num(s.views),
-              fmtDate(s.lastSeen),
-            ])}
+          <DataTable
+            rows={t.schools}
+            rowKey={(r) => r.school}
+            defaultSort={[2, -1]}
+            cols={[
+              { label: "School", left: true, sort: (r) => r.school, render: (r) => r.school },
+              { label: "Teachers", sort: (r) => r.teachers, render: (r) => num(r.teachers) },
+              { label: "Visits", sort: (r) => r.visits, render: (r) => num(r.visits) },
+              { label: "Views", sort: (r) => r.views, render: (r) => num(r.views) },
+              {
+                label: "Last seen",
+                nowrap: true,
+                sort: (r) => r.lastSeen,
+                render: (r) => fmtDate(r.lastSeen),
+              },
+            ]}
           />
         </Section>
       )}
@@ -1229,27 +1402,67 @@ function TeachersSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel
       <Section
         title="Teacher activity"
         subtitle={rangeLabel}
-        info="One row per pseudonymous teacher: visits, page views, first/last seen, and the lessons they reached."
+        info="One row per pseudonymous teacher: visits, page views, first/last seen, and the lessons they reached (hover the lesson count for the list)."
         exportData={t.rows.map((r) => ({ ...r, lessons: r.lessons.join(", ") }))}
         exportName="website-teachers"
       >
         {t.rows.length > 0 ? (
-          <SimpleTable
-            headers={["Teacher", "School", "Visits", "Views", "First seen", "Last seen", "Lessons visited"]}
-            rows={t.rows.map((r) => [
-              <code key="c" className="text-xs bg-gray-100 rounded px-1.5 py-0.5">{r.code}</code>,
-              r.school ?? "—",
-              num(r.visits),
-              num(r.views),
-              fmtDate(r.firstSeen),
-              fmtDate(r.lastSeen),
-              r.lessons.length > 0 ? r.lessons.join(", ") : "—",
-            ])}
+          <DataTable
+            rows={t.rows}
+            rowKey={(r) => r.code}
+            defaultSort={[5, -1]}
+            minWidth={720}
+            cols={[
+              {
+                label: "Teacher",
+                left: true,
+                render: (r) => (
+                  <code className="text-xs bg-gray-100 rounded px-1.5 py-0.5">{r.code}</code>
+                ),
+              },
+              {
+                label: "School",
+                left: true,
+                sort: (r) => r.school ?? "~", // unknowns sort last
+                render: (r) => r.school ?? "—",
+              },
+              { label: "Visits", sort: (r) => r.visits, render: (r) => num(r.visits) },
+              { label: "Views", sort: (r) => r.views, render: (r) => num(r.views) },
+              {
+                label: "First seen",
+                nowrap: true,
+                sort: (r) => r.firstSeen,
+                render: (r) => fmtDate(r.firstSeen),
+              },
+              {
+                label: "Last seen",
+                nowrap: true,
+                sort: (r) => r.lastSeen,
+                render: (r) => fmtDate(r.lastSeen),
+              },
+              {
+                label: "Lessons visited",
+                sort: (r) => r.lessons.length,
+                render: (r) =>
+                  r.lessons.length === 0 ? (
+                    "—"
+                  ) : (
+                    <span className="relative inline-flex group cursor-help underline decoration-dotted decoration-gray-300 whitespace-nowrap">
+                      {r.lessons.length} lesson{r.lessons.length === 1 ? "" : "s"}
+                      <span className="pointer-events-none absolute right-0 top-6 z-30 hidden group-hover:block w-72 bg-gray-900 text-white text-xs rounded-lg p-3 leading-relaxed shadow-lg text-left normal-case">
+                        {r.lessons.map((slug) => (
+                          <span key={slug} className="block">
+                            {lessonLabels.get(slug) ?? slug}
+                          </span>
+                        ))}
+                      </span>
+                    </span>
+                  ),
+              },
+            ]}
           />
         ) : (
-          <EmptyHint>
-            No identified teacher sessions in this range.
-          </EmptyHint>
+          <EmptyHint>No identified teacher sessions in this range.</EmptyHint>
         )}
       </Section>
     </>

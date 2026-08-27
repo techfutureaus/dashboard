@@ -322,6 +322,10 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
   const anonTime = Math.max(0, total.totaltime - teacher.totaltime);
   const anonVisits = Math.max(0, total.visits - teacher.visits);
   const cumulative = useMemo(() => cumulativeTrend(trend), [trend]);
+  const [trafficAudience, setTrafficAudience] = useState<Audience>("anonymous");
+  const trafficKey = trafficAudience === "teacher" ? "Teachers" : "Anonymous";
+  // Audience colors stay fixed everywhere: Anonymous blue, Teachers amber.
+  const trafficColor = trafficAudience === "teacher" ? PALETTE[1] : PALETTE[0];
   const geo = data.geography[geoAudience];
   const devices = data.geography[deviceAudience].devices;
 
@@ -367,11 +371,15 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
         />
       </div>
 
+      {/* One audience at a time: teacher volume is always dwarfed by
+          anonymous, so both series in one chart makes the teacher data
+          unreadable — the toggle drives both traffic charts at once. */}
+      <div className="mb-3">{audienceToggle(trafficAudience, setTrafficAudience)}</div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <Section
           title="Traffic over time"
           subtitle={rangeLabel}
-          info="Pageviews per period, split into anonymous visitors and teacher-tagged visitors (teacher tagging exists from 21 Aug 2026 — earlier traffic all reads as anonymous)."
+          info="Pageviews per period for the selected audience."
           exportData={trend}
           exportName="website-trend"
         >
@@ -383,9 +391,7 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="Anonymous" fill={PALETTE[0]} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="Teachers" fill={PALETTE[1]} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey={trafficKey} fill={trafficColor} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -397,7 +403,7 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
         <Section
           title="Cumulative traffic"
           subtitle={rangeLabel}
-          info="Running pageview total across the filtered range — starts at zero and climbs to the period's total, for each audience."
+          info="Running pageview total across the filtered range — starts at zero and climbs to the period's total."
           exportData={cumulative}
           exportName="website-trend-cumulative"
         >
@@ -409,21 +415,12 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Area
                     type="monotone"
-                    dataKey="Anonymous"
-                    stroke={PALETTE[0]}
-                    fill={PALETTE[0]}
-                    fillOpacity={0.15}
-                    strokeWidth={2}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="Teachers"
-                    stroke={PALETTE[1]}
-                    fill={PALETTE[1]}
-                    fillOpacity={0.2}
+                    dataKey={trafficKey}
+                    stroke={trafficColor}
+                    fill={trafficColor}
+                    fillOpacity={0.18}
                     strokeWidth={2}
                   />
                 </AreaChart>
@@ -439,7 +436,7 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
         <Section
           title="Audience mix"
           subtitle={rangeLabel}
-          info="Share of lesson activity by user type, counted from lesson page-view events — covers the full history (unlike pageview tagging, which starts 21 Aug 2026)."
+          info="Share of lesson activity by user type, counted from lesson page-view events."
           exportData={data.audience.eventUserTypes}
           exportName="website-user-types"
         >
@@ -880,7 +877,7 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
                 ? `${num(lesson.teacherPageViews)} / ${num(lesson.anonymousPageViews)}`
                 : "–"
             }
-            sub="page views · tracked since 27 Aug"
+            sub="page views"
           />
           <KpiCard label="Interactions" value={num(lesson.interactions)} />
           <KpiCard label="Inline quizzes" value={num(lesson.inlineQuizCompletes)} />
@@ -948,9 +945,9 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
           </table>
           {pages.some((p) => p.interactionsSince) && (
             <p className="text-xs text-gray-400 mt-2">
-              * this page name is shared across lessons, so its interactions are counted
-              from 26 Aug 2026 (when per-lesson page tracking was added). Lesson totals
-              above are always exact.
+              * this page name is shared across lessons, so its interaction count
+              started more recently than the others. Lesson totals above are always
+              exact.
             </p>
           )}
         </div>
@@ -1106,7 +1103,7 @@ function TeachersSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel
       <h2 className="text-lg font-bold text-gray-900 mt-10 mb-4">
         Teachers &amp; schools
         <InfoTip
-          text={`Teachers are pseudonymous — random codes plus their school, never names. Role tagging began ${fmtDate(data.tagSince)}, so earlier teacher visits aren't in this section. A small number of teacher sessions (${num(t.unidentifiedSessions)} in this range) closed before the identity call landed and can't be matched to a code.`}
+          text="Teachers are pseudonymous — random codes plus their school, never names. A small number of teacher sessions can't be matched to a code (the visit ended before the identity call landed)."
         />
       </h2>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -1171,7 +1168,7 @@ function TeachersSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel
           />
         ) : (
           <EmptyHint>
-            No identified teacher sessions in this range (tagging began {fmtDate(data.tagSince)}).
+            No identified teacher sessions in this range.
           </EmptyHint>
         )}
       </Section>

@@ -179,11 +179,6 @@ function Dashboard({
     });
   }, [growthAll, range]);
 
-  const netChange = useMemo(
-    () => growthInRange.reduce((sum, g) => sum + g.net, 0),
-    [growthInRange]
-  );
-
   const tags = useMemo(
     () =>
       segments
@@ -243,17 +238,11 @@ function Dashboard({
   return (
     <PageShell {...shellProps} audienceName={audience.name}>
       {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
         <KpiCard
           label="Total subscribers"
           value={audienceMemberCount(audience).toLocaleString()}
           sub="Current"
-        />
-        <KpiCard
-          label="Net change"
-          value={netChange.toLocaleString()}
-          sub={rangeLabel}
-          tone={netChange >= 0 ? "positive" : "negative"}
         />
         <KpiCard
           label="Avg open rate"

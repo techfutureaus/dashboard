@@ -2,8 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  LineChart,
-  Line,
   AreaChart,
   Area,
   BarChart,
@@ -844,7 +842,6 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
                   <td className="py-2 px-2 text-center">{num(p.views)}</td>
                   <td className="py-2 px-2 text-center">
                     {num(p.interactions)}
-                    {p.interactionsSince && <span className="text-gray-400">*</span>}
                   </td>
                   <td className="py-2 pl-2 text-center">
                     {p.lumen ? num(p.lumen.sessions) : "—"}
@@ -853,13 +850,6 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
               ))}
             </tbody>
           </table>
-          {pages.some((p) => p.interactionsSince) && (
-            <p className="text-xs text-gray-400 mt-2">
-              * this page name is shared across lessons, so its interaction count
-              started more recently than the others. Lesson totals above are always
-              exact.
-            </p>
-          )}
         </div>
       </div>
     </div>
@@ -867,6 +857,44 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
 }
 
 // ── Lumen ────────────────────────────────────────────────────────────────────
+
+type ScenarioSortKey = "sessions" | "promptClicks" | "responses" | null;
+
+function Pager({
+  page,
+  setPage,
+  total,
+  perPage,
+}: {
+  page: number;
+  setPage: (p: number) => void;
+  total: number;
+  perPage: number;
+}) {
+  const pages = Math.ceil(total / perPage);
+  if (pages <= 1) return null;
+  return (
+    <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
+      <button
+        onClick={() => setPage(Math.max(0, page - 1))}
+        disabled={page === 0}
+        className="px-2 py-1 border border-gray-200 rounded disabled:opacity-40 hover:bg-gray-50"
+      >
+        ← Prev
+      </button>
+      <span>
+        {page * perPage + 1}–{Math.min((page + 1) * perPage, total)} of {total}
+      </span>
+      <button
+        onClick={() => setPage(Math.min(pages - 1, page + 1))}
+        disabled={page >= pages - 1}
+        className="px-2 py-1 border border-gray-200 rounded disabled:opacity-40 hover:bg-gray-50"
+      >
+        Next →
+      </button>
+    </div>
+  );
+}
 
 function LumenSection({
   data,
@@ -877,22 +905,69 @@ function LumenSection({
   rangeLabel: string;
   granularity: Granularity;
 }) {
+  // Pies cover EVERYTHING (all scenarios / prompts, beyond-palette folded
+  // into Other) regardless of the tables' pagination.
   const scenarioPie = toPie(
-    data.lumen.byScenario.map((s) => ({ name: s.scenario, count: s.sessions }))
+    data.lumen.byScenario.map((sc) => ({ name: sc.scenario, count: sc.sessions })),
+    9
   );
-  const promptPie = toPie(data.lumen.topPrompts, 6);
-  const responsesTrend = useMemo(() => {
-    const buckets = new Map<string, { label: string; Responses: number }>();
-    for (const d of data.lumen.responsesDaily) {
+  const promptPie = toPie(data.lumen.topPrompts, 9);
+
+  const [scenarioSort, setScenarioSort] = useState<ScenarioSortKey>(null);
+  const [scenarioPage, setScenarioPage] = useState(0);
+  const [promptPage, setPromptPage] = useState(0);
+  const SCENARIOS_PER_PAGE = 10;
+  const PROMPTS_PER_PAGE = 15;
+
+  const sortedScenarios = useMemo(() => {
+    const rows = [...data.lumen.byScenario];
+    if (scenarioSort) rows.sort((a, b) => b[scenarioSort] - a[scenarioSort]);
+    else rows.sort((a, b) => a.scenario.localeCompare(b.scenario));
+    return rows;
+  }, [data.lumen.byScenario, scenarioSort]);
+  const scenarioRows = sortedScenarios.slice(
+    scenarioPage * SCENARIOS_PER_PAGE,
+    (scenarioPage + 1) * SCENARIOS_PER_PAGE
+  );
+  const promptRows = data.lumen.topPrompts.slice(
+    promptPage * PROMPTS_PER_PAGE,
+    (promptPage + 1) * PROMPTS_PER_PAGE
+  );
+
+  const scenarioHeader = (label: string, key: Exclude<ScenarioSortKey, null>) => (
+    <button
+      onClick={() => {
+        setScenarioSort((k) => (k === key ? null : key));
+        setScenarioPage(0);
+      }}
+      className={`w-full uppercase tracking-wide text-xs font-semibold whitespace-nowrap text-center ${
+        scenarioSort === key ? "text-violet-700" : "text-gray-500 hover:text-gray-800"
+      }`}
+    >
+      {label}
+      {scenarioSort === key ? " ↓" : ""}
+    </button>
+  );
+
+  const sessionsTrend = useMemo(() => {
+    const buckets = new Map<string, { label: string; Sessions: number }>();
+    for (const d of data.lumen.sessionsDaily) {
       const { key, label } = bucketOf(d.date, granularity);
-      const b = buckets.get(key) ?? { label, Responses: 0 };
-      b.Responses += d.count;
+      const b = buckets.get(key) ?? { label, Sessions: 0 };
+      b.Sessions += d.count;
       buckets.set(key, b);
     }
     return [...buckets.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([, v]) => v);
-  }, [data.lumen.responsesDaily, granularity]);
+  }, [data.lumen.sessionsDaily, granularity]);
+  const sessionsCumulative = useMemo(() => {
+    const out: { label: string; Sessions: number }[] = [];
+    for (const b of sessionsTrend) {
+      out.push({ label: b.label, Sessions: (out[out.length - 1]?.Sessions ?? 0) + b.Sessions });
+    }
+    return out;
+  }, [sessionsTrend]);
 
   return (
     <>
@@ -935,93 +1010,166 @@ function LumenSection({
         <Section
           title="Scenarios"
           subtitle={rangeLabel}
-          info="Share of Lumen sessions per scenario, with where each scenario is embedded in course content."
-          exportData={data.lumen.byScenario.map((s) => ({
-            scenario: s.scenario,
-            location: s.location
-              ? `L${s.location.lessonNumber} · ${s.location.pageTitle}`
+          info="Share of Lumen sessions per scenario (the pie covers every scenario), with the lesson page each one is embedded on."
+          exportData={sortedScenarios.map((sc) => ({
+            scenario: sc.scenario,
+            lessonPage: sc.location
+              ? `L${sc.location.lessonNumber} · ${sc.location.pageTitle}`
               : "",
-            sessions: s.sessions,
-            promptClicks: s.promptClicks,
-            responses: s.responses,
+            sessions: sc.sessions,
+            promptClicks: sc.promptClicks,
+            responses: sc.responses,
           }))}
           exportName="website-lumen-scenarios"
         >
           <Donut data={scenarioPie} />
-          <SimpleTable
-            headers={["Scenario", "Where it lives", "Sessions", "Clicks", "Responses"]}
-            rows={data.lumen.byScenario.map((s) => [
-              <span key="n">
-                <Swatch color={rowColor(s.scenario, scenarioPie)} />
-                {s.scenario}
-              </span>,
-              s.location ? (
-                <span key="loc">
-                  <span className="text-gray-400">L{s.location.lessonNumber} ·</span>{" "}
-                  {s.location.pageTitle}
-                </span>
-              ) : (
-                "—"
-              ),
-              num(s.sessions),
-              num(s.promptClicks),
-              num(s.responses),
-            ])}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="py-2 pr-3 text-left uppercase tracking-wide text-xs font-semibold text-gray-500 whitespace-nowrap">
+                    Scenario
+                  </th>
+                  <th className="py-2 pr-3 text-left uppercase tracking-wide text-xs font-semibold text-gray-500 whitespace-nowrap">
+                    Lesson Page
+                  </th>
+                  <th className="py-2 px-2">{scenarioHeader("Sessions", "sessions")}</th>
+                  <th className="py-2 px-2">{scenarioHeader("Clicks", "promptClicks")}</th>
+                  <th className="py-2 pl-2">{scenarioHeader("Responses", "responses")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scenarioRows.map((sc) => (
+                  <tr key={sc.scenario} className="border-b border-gray-100 last:border-0">
+                    <td className="py-2 pr-3 text-gray-700 whitespace-nowrap">
+                      <Swatch color={rowColor(sc.scenario, scenarioPie)} />
+                      {sc.scenario}
+                    </td>
+                    <td className="py-2 pr-3 text-gray-700">
+                      {sc.location ? (
+                        <span>
+                          <span className="text-gray-400">L{sc.location.lessonNumber} ·</span>{" "}
+                          {sc.location.pageTitle}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="py-2 px-2 text-center">{num(sc.sessions)}</td>
+                    <td className="py-2 px-2 text-center">{num(sc.promptClicks)}</td>
+                    <td className="py-2 pl-2 text-center">{num(sc.responses)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pager
+            page={scenarioPage}
+            setPage={setScenarioPage}
+            total={sortedScenarios.length}
+            perPage={SCENARIOS_PER_PAGE}
           />
         </Section>
 
         <Section
           title="Top prompts"
           subtitle={rangeLabel}
-          info="Most-clicked predefined prompts across all Lumen scenarios."
+          info="Most-clicked predefined prompts across all Lumen scenarios (the pie covers every prompt)."
           exportData={data.lumen.topPrompts}
           exportName="website-lumen-prompts"
         >
           <Donut data={promptPie} />
-          <SimpleTable
-            headers={["Prompt", "Clicks"]}
-            rows={data.lumen.topPrompts.slice(0, 15).map((p) => [
-              <span key="n">
-                <Swatch color={rowColor(p.name, promptPie)} />
-                {p.name}
-              </span>,
-              num(p.count),
-            ])}
+          <table className="w-auto text-sm">
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="py-2 pr-6 text-left uppercase tracking-wide text-xs font-semibold text-gray-500">
+                  Prompt
+                </th>
+                <th className="py-2 text-center uppercase tracking-wide text-xs font-semibold text-gray-500">
+                  Clicks
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {promptRows.map((pr) => (
+                <tr key={pr.name} className="border-b border-gray-100 last:border-0">
+                  <td className="py-2 pr-6 text-gray-700">
+                    <Swatch color={rowColor(pr.name, promptPie)} />
+                    {pr.name}
+                  </td>
+                  <td className="py-2 text-center">{num(pr.count)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Pager
+            page={promptPage}
+            setPage={setPromptPage}
+            total={data.lumen.topPrompts.length}
+            perPage={PROMPTS_PER_PAGE}
           />
         </Section>
       </div>
 
-      <Section
-        title="Lumen responses over time"
-        subtitle={rangeLabel}
-        info="AI responses generated in Lumen activities per period."
-        exportData={responsesTrend}
-        exportName="website-lumen-daily"
-      >
-        {responsesTrend.length > 0 ? (
-          <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={responsesTrend}
-                margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Line type="monotone" dataKey="Responses" stroke={PALETTE[2]} strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <EmptyHint>No responses in this range.</EmptyHint>
-        )}
-      </Section>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <Section
+          title="Lumen sessions over time"
+          subtitle={rangeLabel}
+          info="Lumen activity sessions started per period."
+          exportData={sessionsTrend}
+          exportName="website-lumen-sessions"
+        >
+          {sessionsTrend.length > 0 ? (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={sessionsTrend} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Bar dataKey="Sessions" fill={PALETTE[2]} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <EmptyHint>No sessions in this range.</EmptyHint>
+          )}
+        </Section>
+
+        <Section
+          title="Cumulative Lumen sessions"
+          subtitle={rangeLabel}
+          info="Running total of Lumen sessions across the filtered range."
+          exportData={sessionsCumulative}
+          exportName="website-lumen-sessions-cumulative"
+        >
+          {sessionsCumulative.length > 0 ? (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={sessionsCumulative} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Area
+                    type="monotone"
+                    dataKey="Sessions"
+                    stroke={PALETTE[2]}
+                    fill={PALETTE[2]}
+                    fillOpacity={0.18}
+                    strokeWidth={2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <EmptyHint>No sessions in this range.</EmptyHint>
+          )}
+        </Section>
+      </div>
     </>
   );
 }
-
-// ── Teachers ─────────────────────────────────────────────────────────────────
 
 function TeachersSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: string }) {
   const t = data.teachers;

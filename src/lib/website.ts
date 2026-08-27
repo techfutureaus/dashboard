@@ -155,6 +155,7 @@ export interface WebsiteReport {
     }[];
     topPrompts: NameCount[];
     responsesDaily: { date: string; count: number }[];
+    sessionsDaily: { date: string; count: number }[];
   };
   teachers: {
     identifiedTeachers: number;
@@ -341,6 +342,7 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
     sessions: 0, promptClicks: 0, responses: 0,
   };
   const responsesDaily: { date: string; count: number }[] = [];
+  const sessionsDaily: { date: string; count: number }[] = [];
   const eventTotals = new Map<string, number>();
 
   const audienceLessonTotals = new Map<string, Map<string, number>>(); // userType → lesson → views
@@ -397,6 +399,9 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
     lumenTotals.responses += d.lumen?.responses ?? 0;
     if ((d.lumen?.responses ?? 0) > 0) {
       responsesDaily.push({ date: compactDate(d.date), count: d.lumen.responses });
+    }
+    if ((d.lumen?.sessions ?? 0) > 0) {
+      sessionsDaily.push({ date: compactDate(d.date), count: d.lumen.sessions });
     }
   }
 
@@ -624,6 +629,7 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
         .sort((a, b) => b.sessions - a.sessions),
       topPrompts: mapToRows(promptTotals).slice(0, 25),
       responsesDaily,
+      sessionsDaily,
     },
     teachers: {
       identifiedTeachers: rows.length,
@@ -642,7 +648,7 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
 // a stale old-shape payload (seen in prod, Aug 2026 — client crashed reading
 // a field the cached report predated). Bump the suffix whenever
 // WebsiteReport's shape changes; the tag stays stable for cache busting.
-export const getWebsiteReport = cached(_getWebsiteReport, "umami-website-v3", {
+export const getWebsiteReport = cached(_getWebsiteReport, "umami-website-v4", {
   revalidate: 43200,
   tags: [TAGS.umamiWebsite],
 });

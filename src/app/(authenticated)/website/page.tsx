@@ -304,7 +304,6 @@ type Audience = "anonymous" | "teacher";
 function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: string }) {
   const granularity = autoGranularity(data.audience.daily.length);
   const [geoAudience, setGeoAudience] = useState<Audience>("anonymous");
-  const [deviceAudience, setDeviceAudience] = useState<Audience>("anonymous");
 
   const trend = useMemo(
     () => aggregateTrend(data.audience.daily, granularity),
@@ -321,7 +320,7 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
   // Audience colors stay fixed everywhere: Anonymous blue, Teachers amber.
   const trafficColor = trafficAudience === "teacher" ? PALETTE[1] : PALETTE[0];
   const geo = data.geography[geoAudience];
-  const devices = data.geography[deviceAudience].devices;
+  const devices = data.geography[trafficAudience].devices;
 
   const audienceToggle = (value: Audience, onChange: (v: Audience) => void) => (
     <SegmentedControl
@@ -369,9 +368,8 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
           anonymous, so both series in one chart makes the teacher data
           unreadable — the toggle drives both traffic charts at once. */}
       <div className="mb-3">{audienceToggle(trafficAudience, setTrafficAudience)}</div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <Section
-          title="Traffic over time"
+      <Section
+        title="Traffic over time"
           subtitle={rangeLabel}
           info="Pageviews per period for the selected audience."
           exportData={trend}
@@ -392,8 +390,9 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
           ) : (
             <EmptyHint>No traffic in this range.</EmptyHint>
           )}
-        </Section>
+      </Section>
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <Section
           title="Cumulative traffic"
           subtitle={rangeLabel}
@@ -402,7 +401,7 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
           exportName="website-trend-cumulative"
         >
           {cumulative.length > 0 ? (
-            <div className="h-72">
+            <div className="h-[420px]">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={cumulative} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -424,20 +423,19 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
             <EmptyHint>No traffic in this range.</EmptyHint>
           )}
         </Section>
-      </div>
 
-      <Section
-        title="Devices"
-        subtitle={rangeLabel}
-        info="Visitor device mix for the selected range. Toggle between anonymous visitors and teachers."
-        exportData={devices}
-        exportName={`website-devices-${deviceAudience}`}
-      >
-        <div className="mb-4">{audienceToggle(deviceAudience, setDeviceAudience)}</div>
-        <div className="max-w-md mx-auto">
-          <DonutWithTable rows={devices} />
-        </div>
-      </Section>
+        <Section
+          title="Devices"
+          subtitle={rangeLabel}
+          info="Visitor device mix for the selected range and audience — the Anonymous/Teachers toggle above the traffic charts drives this too."
+          exportData={devices}
+          exportName={`website-devices-${trafficAudience}`}
+        >
+          <div className="max-w-md mx-auto">
+            <DonutWithTable rows={devices} />
+          </div>
+        </Section>
+      </div>
 
       {/* ── Geography ──────────────────────────────────────────────────── */}
       <Section

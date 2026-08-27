@@ -146,18 +146,24 @@ export function KpiCard({
   label,
   value,
   sub,
+  info,
   tone = "neutral",
 }: {
   label: string;
   value: string;
   sub?: string;
+  /** Context shown in a hover tooltip next to the label. */
+  info?: string;
   tone?: "neutral" | "positive" | "negative";
 }) {
   const toneClass =
     tone === "positive" ? "text-green-600" : tone === "negative" ? "text-red-600" : "text-gray-900";
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4">
-      <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
+      <p className="text-xs text-gray-500 uppercase tracking-wide">
+        {label}
+        {info && <InfoTip text={info} />}
+      </p>
       <p className={`text-2xl font-bold mt-1 ${toneClass}`}>{value}</p>
       {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
     </div>

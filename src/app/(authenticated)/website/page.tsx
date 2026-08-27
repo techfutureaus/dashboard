@@ -15,7 +15,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
 } from "recharts";
 import { UmamiReportPage } from "@/components/UmamiReportPage";
@@ -33,7 +32,6 @@ import type {
   DailyPoint,
   CourseReport,
   LessonReport,
-  DeviceMonth,
 } from "@/lib/website";
 import type { NameCount } from "@/lib/umami";
 
@@ -106,9 +104,6 @@ const fmtDate = (iso: string) =>
     month: "short",
     year: "numeric",
   });
-
-const fmtMonth = (yyyymm: string) =>
-  new Date(`${yyyymm}-01`).toLocaleDateString("en-AU", { month: "short", year: "2-digit" });
 
 const INTERACTION_LABELS: Record<string, string> = {
   accordion_open: "Accordion opens",
@@ -310,7 +305,6 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
   const granularity = autoGranularity(data.audience.daily.length);
   const [geoAudience, setGeoAudience] = useState<Audience>("anonymous");
   const [deviceAudience, setDeviceAudience] = useState<Audience>("anonymous");
-  const [deviceView, setDeviceView] = useState<"share" | "monthly">("share");
 
   const trend = useMemo(
     () => aggregateTrend(data.audience.daily, granularity),
@@ -432,51 +426,18 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
         </Section>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <Section
-          title="Audience mix"
-          subtitle={rangeLabel}
-          info="Share of lesson activity by user type, counted from lesson page-view events."
-          exportData={data.audience.eventUserTypes}
-          exportName="website-user-types"
-        >
-          <DonutWithTable
-            rows={data.audience.eventUserTypes.map((r) => ({
-              name: r.name.charAt(0).toUpperCase() + r.name.slice(1),
-              count: r.count,
-            }))}
-          />
-        </Section>
-
-        <Section
-          title="Devices"
-          subtitle={rangeLabel}
-          info="Visitor device mix. Toggle between anonymous visitors and teachers, or switch to the over-time view to watch the mix shift."
-          exportData={devices}
-          exportName={`website-devices-${deviceAudience}`}
-        >
-          <div className="flex flex-wrap gap-3 mb-4">
-            {audienceToggle(deviceAudience, setDeviceAudience)}
-            <SegmentedControl
-              value={deviceView}
-              onChange={setDeviceView}
-              options={[
-                { value: "share", label: "Share" },
-                { value: "monthly", label: "Over time" },
-              ]}
-            />
-          </div>
-          {deviceView === "share" ? (
-            <DonutWithTable rows={devices} />
-          ) : (
-            <DeviceMonthly
-              months={data.deviceMonthly}
-              audience={deviceAudience}
-              granularity={granularity}
-            />
-          )}
-        </Section>
-      </div>
+      <Section
+        title="Devices"
+        subtitle={rangeLabel}
+        info="Visitor device mix for the selected range. Toggle between anonymous visitors and teachers."
+        exportData={devices}
+        exportName={`website-devices-${deviceAudience}`}
+      >
+        <div className="mb-4">{audienceToggle(deviceAudience, setDeviceAudience)}</div>
+        <div className="max-w-md mx-auto">
+          <DonutWithTable rows={devices} />
+        </div>
+      </Section>
 
       {/* ── Geography ──────────────────────────────────────────────────── */}
       <Section
@@ -529,99 +490,6 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
       {/* ── Teachers & schools ─────────────────────────────────────────── */}
       <TeachersSection data={data} rangeLabel={rangeLabel} />
     </>
-  );
-}
-
-// ── devices over time ────────────────────────────────────────────────────────
-
-function DeviceMonthly({
-  months: monthsRaw,
-  audience,
-  granularity,
-}: {
-  months: DeviceMonth[];
-  audience: Audience;
-  granularity: Granularity;
-}) {
-  // Device data arrives in monthly buckets — group them up to the global
-  // time scale where that's coarser (quarter/year); day/week show monthly.
-  const months = useMemo(() => {
-    if (granularity !== "quarter" && granularity !== "year") return monthsRaw;
-    const grouped = new Map<string, DeviceMonth>();
-    const merge = (into: NameCount[], from: NameCount[]) => {
-      for (const r of from) {
-        const hit = into.find((x) => x.name === r.name);
-        if (hit) hit.count += r.count;
-        else into.push({ ...r });
-      }
-    };
-    for (const m of monthsRaw) {
-      const [y, mm] = m.month.split("-");
-      const key =
-        granularity === "year" ? y : `${y}-Q${Math.ceil(Number(mm) / 3)}`;
-      const g = grouped.get(key) ?? { month: key, all: [], teacher: [] };
-      merge(g.all, m.all);
-      merge(g.teacher, m.teacher);
-      grouped.set(key, g);
-    }
-    return [...grouped.values()];
-  }, [monthsRaw, granularity]);
-
-  const deviceTypes = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const m of months) {
-      const rows =
-        audience === "teacher"
-          ? m.teacher
-          : m.all.map((r) => ({
-              name: r.name,
-              count: Math.max(0, r.count - (m.teacher.find((t) => t.name === r.name)?.count ?? 0)),
-            }));
-      for (const r of rows) totals.set(r.name, (totals.get(r.name) ?? 0) + r.count);
-    }
-    return [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n).slice(0, 6);
-  }, [months, audience]);
-
-  const rows = months.map((m) => {
-    const source =
-      audience === "teacher"
-        ? m.teacher
-        : m.all.map((r) => ({
-            name: r.name,
-            count: Math.max(0, r.count - (m.teacher.find((t) => t.name === r.name)?.count ?? 0)),
-          }));
-    const row: Record<string, string | number> = {
-      // Keys are "YYYY-MM", "YYYY-Qn", or "YYYY" depending on the time scale.
-      label: /^\d{4}-\d{2}$/.test(m.month) ? fmtMonth(m.month) : m.month,
-    };
-    for (const t of deviceTypes) row[t] = source.find((r) => r.name === t)?.count ?? 0;
-    return row;
-  });
-
-  if (deviceTypes.length === 0) return <EmptyHint>No device data yet.</EmptyHint>;
-  return (
-    <div className="h-64">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-          <YAxis tick={{ fontSize: 11 }} />
-          <Tooltip />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
-          {deviceTypes.map((t, i) => (
-            <Bar
-              key={t}
-              dataKey={t}
-              stackId="devices"
-              fill={sliceColor(i)}
-              stroke="#ffffff"
-              strokeWidth={1}
-              radius={i === deviceTypes.length - 1 ? [4, 4, 0, 0] : undefined}
-            />
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
   );
 }
 
@@ -725,19 +593,36 @@ function CoursesSection({
         exportName={`website-course-${course.slug}`}
       >
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
-          <KpiCard label="Course views" value={num(course.courseViews)} />
-          <KpiCard label="Lesson page views" value={num(course.lessonPageViews)} />
+          <KpiCard
+            label="Course views"
+            value={num(course.courseViews)}
+            info="Times the course landing page was viewed."
+          />
+          <KpiCard
+            label="Lesson page views"
+            value={num(course.lessonPageViews)}
+            info="Views of pages inside this course's lessons."
+          />
           <KpiCard
             label="Teacher visits"
             value={num(course.teacherSessions)}
-            sub="teacher sessions reaching a lesson"
+            info="Teacher sessions that reached at least one lesson in this course."
           />
-          <KpiCard label="Interactions" value={num(course.interactions)} sub="accordions, reveals, links, media" />
-          <KpiCard label="Lumen sessions" value={num(course.lumen.sessions)} sub="in this course's activities" />
-          <KpiCard label="Inline quizzes" value={num(course.inlineQuizCompletes)} sub="knowledge checks completed" />
-          <KpiCard label="Quiz completions" value={num(course.quizCompletes)} sub="end-of-lesson" />
-          <KpiCard label="Certificates generated" value={num(course.certificates)} />
-          <KpiCard label="Teacher feedback" value={num(course.feedback)} />
+          <KpiCard
+            label="Interactions"
+            value={num(course.interactions + course.certificates)}
+            info="Accordion opens, reveals, tab switches, audio and video plays, link and resource clicks, and certificates generated."
+          />
+          <KpiCard
+            label="Lumen sessions"
+            value={num(course.lumen.sessions)}
+            info="Sessions in the Lumen AI activities embedded in this course."
+          />
+          <KpiCard
+            label="Quiz completions"
+            value={num(course.quizCompletes)}
+            info="End-of-lesson quizzes completed (practice-until-correct, so completing always means 100%)."
+          />
         </div>
 
         {course.lessons.length > 0 ? (

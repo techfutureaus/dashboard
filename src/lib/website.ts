@@ -24,6 +24,7 @@ import { dayStartMs, todaySydney } from "./rollup";
 // automatically.
 export const TAG_SINCE = "2026-08-21"; // teacher tag epoch
 export const PAGE_KEY_SINCE = "2026-08-26"; // lesson-scoped page_key epoch
+export const AUDIENCE_LESSON_SINCE = "2026-08-27"; // audience×lesson composite epoch
 const SESSION_SCAN_CAP = 10000;
 
 export type { StatBlock };
@@ -59,6 +60,13 @@ export interface LessonReport {
   number: number;
   lessonViews: number;
   pageViews: number;
+  /** Teacher-tagged sessions that reached this lesson (session archive,
+   * available from the TAG_SINCE epoch). */
+  teacherSessions: number;
+  /** Exact teacher/anonymous page-view split from the audience_lesson
+   * composite the site sends since AUDIENCE_LESSON_SINCE. */
+  teacherPageViews: number;
+  anonymousPageViews: number;
   interactions: number;
   interactionBreakdown: Record<string, number>;
   quizCompletes: number;
@@ -75,6 +83,7 @@ export interface CourseReport {
   courseViews: number;
   lessonViews: number;
   lessonPageViews: number;
+  teacherSessions: number;
   interactions: number;
   quizCompletes: number;
   inlineQuizCompletes: number;
@@ -334,9 +343,15 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
   const responsesDaily: { date: string; count: number }[] = [];
   const eventTotals = new Map<string, number>();
 
+  const audienceLessonTotals = new Map<string, Map<string, number>>(); // userType → lesson → views
   for (const d of days) {
     sumMaps(courseViewTotals, d.courses);
     sumMaps(eventTotals, d.events);
+    for (const [userType, lessons] of Object.entries(d.audienceLessons ?? {})) {
+      const m = audienceLessonTotals.get(userType) ?? new Map<string, number>();
+      sumMaps(m, lessons);
+      audienceLessonTotals.set(userType, m);
+    }
     for (const [slug, l] of Object.entries(d.lessons ?? {})) {
       const t = lessonTotals.get(slug) ?? {
         lessonViews: 0, pageViews: 0, quizCompletes: 0, inlineQuizCompletes: 0,
@@ -393,6 +408,15 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
       for (const p of lesson.pages) {
         pageSlugOwners.set(p.slug, (pageSlugOwners.get(p.slug) ?? 0) + 1);
       }
+    }
+  }
+
+  // Teacher-tagged sessions per lesson, from the session archive.
+  const teacherSessionsByLesson = new Map<string, number>();
+  for (const s of sessions) {
+    if (!s.teacher) continue;
+    for (const l of s.lessons ?? []) {
+      teacherSessionsByLesson.set(l, (teacherSessionsByLesson.get(l) ?? 0) + 1);
     }
   }
 
@@ -463,6 +487,9 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
         number: lessonNumber,
         lessonViews: totals?.lessonViews ?? 0,
         pageViews: totals?.pageViews ?? 0,
+        teacherSessions: teacherSessionsByLesson.get(lesson.slug) ?? 0,
+        teacherPageViews: audienceLessonTotals.get("teacher")?.get(lesson.slug) ?? 0,
+        anonymousPageViews: audienceLessonTotals.get("anonymous")?.get(lesson.slug) ?? 0,
         interactions: totals?.interactions ?? 0,
         interactionBreakdown: Object.fromEntries(totals?.interactionBreakdown ?? []),
         quizCompletes: totals?.quizCompletes ?? 0,
@@ -481,6 +508,7 @@ async function _getWebsiteReport(range: UmamiRange): Promise<WebsiteReport> {
       courseViews: courseViewTotals.get(course.slug) ?? 0,
       lessonViews: sum((l) => l.lessonViews),
       lessonPageViews: sum((l) => l.pageViews),
+      teacherSessions: sum((l) => l.teacherSessions),
       interactions: sum((l) => l.interactions),
       quizCompletes: sum((l) => l.quizCompletes),
       inlineQuizCompletes: sum((l) => l.inlineQuizCompletes),

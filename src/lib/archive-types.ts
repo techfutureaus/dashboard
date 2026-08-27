@@ -73,6 +73,10 @@ export interface ArchiveDay {
   pages: Record<string, Record<string, number>>; // lesson → page → views (from URLs)
   pageInteractions: Record<string, number>; // page_slug → interactions (full history)
   pageKeyInteractions: Record<string, Record<string, number>>; // lesson → page (since PAGE_KEY_SINCE)
+  // user_type → lesson slug → lesson_page_view count, from the composite
+  // audience_lesson property the site sends since 2026-08-27. Optional —
+  // days before that have nothing to record.
+  audienceLessons?: Record<string, Record<string, number>>;
   geo: GeoMaps;
   teacherGeo: GeoMaps;
   devices: Record<string, number>;

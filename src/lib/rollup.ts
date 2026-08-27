@@ -170,7 +170,7 @@ async function buildDay(date: string, pool: Pool): Promise<ArchiveDay> {
   const [
     stats, teacherStats, eventRows, urls,
     geo, teacherGeo, devices, teacherDevices,
-    userTypesRaw, courseViews,
+    userTypesRaw, audienceLessonRows, courseViews,
     lessonSets, interactionsByLesson, interactionsByPage, interactionsByPageKey,
     scenarioSessions, scenarioClicks, scenarioResponses, promptRows,
     inputTokens, outputTokens, responseMsSum,
@@ -184,6 +184,7 @@ async function buildDay(date: string, pool: Pool): Promise<ArchiveDay> {
     metrics("device").then(toMap),
     metrics("device", { tag: "teacher" }).then(toMap),
     values("lesson_page_view", "user_type"),
+    values("lesson_page_view", "audience_lesson"),
     values("course_view", "course_slug"),
     Promise.all(
       Object.keys(LESSON_EVENT_FIELDS).map(async (ev) => [ev, await values(ev, "lesson_slug")] as const)
@@ -220,6 +221,16 @@ async function buildDay(date: string, pool: Pool): Promise<ArchiveDay> {
   for (const r of courseViews) {
     const slug = aliasCourse(r.name);
     courses[slug] = (courses[slug] ?? 0) + r.count;
+  }
+
+  // audience_lesson = "user_type:lesson_slug" → nested split map.
+  const audienceLessons: Record<string, Record<string, number>> = {};
+  for (const r of audienceLessonRows) {
+    const [userTypeRaw, lessonSlug] = r.name.split(":");
+    if (!userTypeRaw || !lessonSlug) continue;
+    const userType = userTypeRaw === "authenticated" ? "teacher" : userTypeRaw;
+    const byLesson = (audienceLessons[userType] ??= {});
+    byLesson[lessonSlug] = (byLesson[lessonSlug] ?? 0) + r.count;
   }
 
   const lessons: Record<string, LessonDay> = {};
@@ -284,6 +295,7 @@ async function buildDay(date: string, pool: Pool): Promise<ArchiveDay> {
     teacherStats: statBlock(teacherStats),
     events,
     userTypes,
+    audienceLessons,
     courses,
     lessons,
     pages,

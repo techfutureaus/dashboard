@@ -584,6 +584,7 @@ function DeviceMonthly({
 type LessonSortKey =
   | "number"
   | "pageViews"
+  | "teacherSessions"
   | "interactions"
   | "inlineQuizCompletes"
   | "quizCompletes"
@@ -662,6 +663,9 @@ function CoursesSection({ courses }: { courses: CourseReport[] }) {
           lesson: l.title,
           lessonViews: l.lessonViews,
           pageViews: l.pageViews,
+          teacherSessions: l.teacherSessions,
+          teacherPageViews: l.teacherPageViews,
+          anonymousPageViews: l.anonymousPageViews,
           interactions: l.interactions,
           inlineQuizCompletes: l.inlineQuizCompletes,
           quizCompletes: l.quizCompletes,
@@ -671,9 +675,14 @@ function CoursesSection({ courses }: { courses: CourseReport[] }) {
         }))}
         exportName={`website-course-${course.slug}`}
       >
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
           <KpiCard label="Course views" value={num(course.courseViews)} />
           <KpiCard label="Lesson page views" value={num(course.lessonPageViews)} />
+          <KpiCard
+            label="Teacher visits"
+            value={num(course.teacherSessions)}
+            sub="teacher sessions reaching a lesson"
+          />
           <KpiCard label="Interactions" value={num(course.interactions)} sub="accordions, reveals, links, media" />
           <KpiCard label="Lumen sessions" value={num(course.lumen.sessions)} sub="in this course's activities" />
           <KpiCard label="Inline quizzes" value={num(course.inlineQuizCompletes)} sub="knowledge checks completed" />
@@ -684,11 +693,12 @@ function CoursesSection({ courses }: { courses: CourseReport[] }) {
 
         {course.lessons.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[760px]">
+            <table className="w-full text-sm min-w-[860px]">
               <thead>
                 <tr className="border-b border-gray-200">
                   <th className="py-2 pr-2 w-2/5">{header("Lesson", "number", false)}</th>
                   <th className="py-2 px-2">{header("Page views", "pageViews")}</th>
+                  <th className="py-2 px-2">{header("Teacher visits", "teacherSessions")}</th>
                   <th className="py-2 px-2">{header("Interactions", "interactions")}</th>
                   <th className="py-2 px-2">{header("Inline quizzes", "inlineQuizCompletes")}</th>
                   <th className="py-2 px-2">{header("Quiz done", "quizCompletes")}</th>
@@ -709,6 +719,7 @@ function CoursesSection({ courses }: { courses: CourseReport[] }) {
                       {lesson.title}
                     </td>
                     <td className="py-2 px-2 text-right">{num(lesson.pageViews)}</td>
+                    <td className="py-2 px-2 text-right">{num(lesson.teacherSessions)}</td>
                     <td className="py-2 px-2 text-right">{num(lesson.interactions)}</td>
                     <td className="py-2 px-2 text-right">{num(lesson.inlineQuizCompletes)}</td>
                     <td className="py-2 px-2 text-right">{num(lesson.quizCompletes)}</td>
@@ -805,6 +816,20 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <KpiCard label="Lesson views" value={num(lesson.lessonViews)} />
           <KpiCard label="Page views" value={num(lesson.pageViews)} />
+          <KpiCard
+            label="Teacher visits"
+            value={num(lesson.teacherSessions)}
+            sub="teacher sessions reaching this lesson"
+          />
+          <KpiCard
+            label="Teacher vs anon views"
+            value={
+              lesson.teacherPageViews + lesson.anonymousPageViews > 0
+                ? `${num(lesson.teacherPageViews)} / ${num(lesson.anonymousPageViews)}`
+                : "–"
+            }
+            sub="page views · tracked since 27 Aug"
+          />
           <KpiCard label="Interactions" value={num(lesson.interactions)} />
           <KpiCard label="Inline quizzes" value={num(lesson.inlineQuizCompletes)} />
           <KpiCard label="Quiz completions" value={num(lesson.quizCompletes)} />

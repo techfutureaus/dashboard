@@ -57,9 +57,7 @@ export function UmamiReportPage<T extends { property: UmamiSource }>({
       <div className="sticky top-0 z-40 bg-gray-50/95 backdrop-blur-sm border-b border-gray-200 px-8 py-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900">{title}</h1>
-          <p className="text-xs text-gray-500">
-            {data?.property.displayName ?? subtitleFallback}
-          </p>
+          <p className="text-xs text-gray-500">{subtitleFallback}</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {headerControls}

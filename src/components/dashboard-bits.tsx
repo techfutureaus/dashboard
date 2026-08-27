@@ -12,15 +12,32 @@ import {
 } from "recharts";
 import { downloadCsv, downloadChartPng } from "@/lib/export";
 
+/** Hover "i" bubble — context that used to live in always-visible subtitles. */
+export function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="relative inline-flex group align-middle ml-1.5">
+      <span className="w-4 h-4 rounded-full bg-gray-200 text-gray-600 text-[10px] font-bold inline-flex items-center justify-center cursor-help select-none">
+        i
+      </span>
+      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-6 z-30 hidden group-hover:block w-72 bg-gray-900 text-white text-xs rounded-lg p-3 leading-relaxed shadow-lg font-normal normal-case text-left">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 export function Section({
   title,
   subtitle,
+  info,
   children,
   exportData,
   exportName,
 }: {
   title: string;
   subtitle?: string;
+  /** Context shown in a hover tooltip next to the title. */
+  info?: string;
   children: React.ReactNode;
   /** Underlying rows for CSV export. Omit to hide CSV option. */
   exportData?: Record<string, unknown>[];
@@ -34,7 +51,10 @@ export function Section({
     <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
-          <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+          <h2 className="text-sm font-semibold text-gray-900">
+            {title}
+            {info && <InfoTip text={info} />}
+          </h2>
           {subtitle && <p className="text-xs text-gray-500">{subtitle}</p>}
         </div>
         {canExport && (

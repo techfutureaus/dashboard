@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import {
   LineChart,
   Line,
+  AreaChart,
+  Area,
   BarChart,
   Bar,
   PieChart,
@@ -24,6 +26,7 @@ import {
   EmptyHint,
   Banner,
   SegmentedControl,
+  InfoTip,
 } from "@/components/dashboard-bits";
 import type {
   WebsiteReport,
@@ -37,8 +40,8 @@ import type { NameCount } from "@/lib/umami";
 export default function WebsitePage() {
   return (
     <UmamiReportPage
-      title="TechFutures Website"
-      subtitleFallback="Audience, courses, Lumen, and teacher engagement."
+      title="Tech Futures Programs Website"
+      subtitleFallback="Analytics powered by Umami"
       useData={useUmamiWebsite}
     >
       {(data, rangeLabel) => <WebsiteBody data={data} rangeLabel={rangeLabel} />}
@@ -57,7 +60,10 @@ function autoGranularity(dayCount: number): Granularity {
 }
 
 // ── palette (validated: fixed categorical order, never cycled) ───────────────
-const PALETTE = ["#2563eb", "#f59e0b", "#8b5cf6", "#059669", "#ec4899", "#0891b2"];
+const PALETTE = [
+  "#2563eb", "#f59e0b", "#8b5cf6", "#059669", "#ec4899",
+  "#0891b2", "#b45309", "#4338ca", "#65a30d",
+];
 const OTHER_COLOR = "#6b7280";
 const sliceColor = (i: number) => PALETTE[i] ?? OTHER_COLOR;
 
@@ -142,23 +148,31 @@ function bucketOf(date: string, g: Granularity): { key: string; label: string } 
   };
 }
 
+// Per-bucket pageviews split into Anonymous vs Teachers (anonymous = total
+// minus the teacher-tagged slice).
 function aggregateTrend(daily: DailyPoint[], g: Granularity) {
-  const buckets = new Map<
-    string,
-    { label: string; Pageviews: number; "Teacher pageviews": number; Sessions: number }
-  >();
+  const buckets = new Map<string, { label: string; Anonymous: number; Teachers: number }>();
   for (const d of daily) {
     const { key, label } = bucketOf(d.date, g);
-    const b =
-      buckets.get(key) ?? { label, Pageviews: 0, "Teacher pageviews": 0, Sessions: 0 };
-    b.Pageviews += d.pageviews;
-    b["Teacher pageviews"] += d.teacherPageviews;
-    b.Sessions += d.sessions;
+    const b = buckets.get(key) ?? { label, Anonymous: 0, Teachers: 0 };
+    b.Anonymous += Math.max(0, d.pageviews - d.teacherPageviews);
+    b.Teachers += d.teacherPageviews;
     buckets.set(key, b);
   }
   return [...buckets.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([, v]) => v);
+}
+
+// Running totals over the filtered range — 0 up to the period total.
+function cumulativeTrend(trend: { label: string; Anonymous: number; Teachers: number }[]) {
+  let anon = 0;
+  let teach = 0;
+  return trend.map((b) => {
+    anon += b.Anonymous;
+    teach += b.Teachers;
+    return { label: b.label, Anonymous: anon, Teachers: teach };
+  });
 }
 
 const toPie = (rows: NameCount[], max = 6): NameCount[] => {
@@ -168,19 +182,6 @@ const toPie = (rows: NameCount[], max = 6): NameCount[] => {
 };
 
 // ── small components ─────────────────────────────────────────────────────────
-
-function InfoTip({ text }: { text: string }) {
-  return (
-    <span className="relative inline-flex group align-middle ml-1.5">
-      <span className="w-4 h-4 rounded-full bg-gray-200 text-gray-600 text-[10px] font-bold inline-flex items-center justify-center cursor-help select-none">
-        i
-      </span>
-      <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-6 z-30 hidden group-hover:block w-72 bg-gray-900 text-white text-xs rounded-lg p-3 leading-relaxed shadow-lg">
-        {text}
-      </span>
-    </span>
-  );
-}
 
 function Donut({ data, height = 280 }: { data: NameCount[]; height?: number }) {
   if (data.length === 0) return <EmptyHint>No data.</EmptyHint>;
@@ -238,12 +239,16 @@ function DonutWithTable({
   rows,
   height,
   maxRows = 10,
+  pieMax = 6,
 }: {
   rows: NameCount[]; // sorted desc; `name` labels slice, tooltip, and row alike
   height?: number;
   maxRows?: number;
+  /** Colored slices before folding into "Other" — e.g. 9 for the states
+   * column so every Australian state keeps its own color. */
+  pieMax?: number;
 }) {
-  const pie = toPie(rows);
+  const pie = toPie(rows, pieMax);
   return (
     <>
       <Donut data={pie} height={height} />
@@ -312,12 +317,11 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
     [data.audience.daily, granularity]
   );
 
-  const { total, teacher, depth } = data.audience;
+  const { total, teacher } = data.audience;
   const anonymousVisitors = Math.max(0, total.visitors - teacher.visitors);
   const anonTime = Math.max(0, total.totaltime - teacher.totaltime);
   const anonVisits = Math.max(0, total.visits - teacher.visits);
-  const pct = (part: number, whole: number) =>
-    whole > 0 ? `${Math.round((part / whole) * 100)}%` : "–";
+  const cumulative = useMemo(() => cumulativeTrend(trend), [trend]);
   const geo = data.geography[geoAudience];
   const devices = data.geography[deviceAudience].devices;
 
@@ -342,8 +346,7 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
       )}
 
       {/* ── Audience ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <KpiCard label="Visitors" value={num(total.visitors)} sub={rangeLabel} />
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
         <KpiCard label="Teachers" value={num(teacher.visitors)} sub="tagged visitors" tone="positive" />
         <KpiCard label="Anonymous" value={num(anonymousVisitors)} sub="mostly students" />
         <KpiCard label="Pageviews" value={num(total.pageviews)} sub={`${num(total.visits)} visits`} />
@@ -358,42 +361,85 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
           sub="per visit"
         />
         <KpiCard
-          label="Viewed 2+ pages"
-          value={pct(depth.multiPage, depth.sessions)}
-          sub={`${num(depth.multiPage)} of ${num(depth.sessions)} visitors`}
-        />
-        <KpiCard
-          label="Returning visitors"
-          value={pct(depth.returning, depth.sessions)}
-          sub="came back for another visit"
+          label="Returning teachers"
+          value={num(data.teachers.returningTeachers)}
+          sub="came back more than once"
         />
       </div>
 
-      <Section title="Traffic over time" subtitle={rangeLabel} exportData={trend} exportName="website-trend">
-        {trend.length > 0 ? (
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trend} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="Pageviews" stroke={PALETTE[0]} strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="Teacher pageviews" stroke={PALETTE[1]} strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="Sessions" stroke={PALETTE[2]} strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <EmptyHint>No traffic in this range.</EmptyHint>
-        )}
-      </Section>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <Section
+          title="Traffic over time"
+          subtitle={rangeLabel}
+          info="Pageviews per period, split into anonymous visitors and teacher-tagged visitors (teacher tagging exists from 21 Aug 2026 — earlier traffic all reads as anonymous)."
+          exportData={trend}
+          exportName="website-trend"
+        >
+          {trend.length > 0 ? (
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={trend} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="Anonymous" fill={PALETTE[0]} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Teachers" fill={PALETTE[1]} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <EmptyHint>No traffic in this range.</EmptyHint>
+          )}
+        </Section>
+
+        <Section
+          title="Cumulative traffic"
+          subtitle={rangeLabel}
+          info="Running pageview total across the filtered range — starts at zero and climbs to the period's total, for each audience."
+          exportData={cumulative}
+          exportName="website-trend-cumulative"
+        >
+          {cumulative.length > 0 ? (
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={cumulative} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Area
+                    type="monotone"
+                    dataKey="Anonymous"
+                    stroke={PALETTE[0]}
+                    fill={PALETTE[0]}
+                    fillOpacity={0.15}
+                    strokeWidth={2}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="Teachers"
+                    stroke={PALETTE[1]}
+                    fill={PALETTE[1]}
+                    fillOpacity={0.2}
+                    strokeWidth={2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <EmptyHint>No traffic in this range.</EmptyHint>
+          )}
+        </Section>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <Section
           title="Audience mix"
-          subtitle="Share of lesson activity by user type — full history"
+          subtitle={rangeLabel}
+          info="Share of lesson activity by user type, counted from lesson page-view events — covers the full history (unlike pageview tagging, which starts 21 Aug 2026)."
           exportData={data.audience.eventUserTypes}
           exportName="website-user-types"
         >
@@ -407,7 +453,8 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
 
         <Section
           title="Devices"
-          subtitle={deviceAudience === "teacher" ? "Teachers" : "Anonymous visitors"}
+          subtitle={rangeLabel}
+          info="Visitor device mix. Toggle between anonymous visitors and teachers, or switch to the over-time view to watch the mix shift."
           exportData={devices}
           exportName={`website-devices-${deviceAudience}`}
         >
@@ -437,12 +484,13 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
       {/* ── Geography ──────────────────────────────────────────────────── */}
       <Section
         title="Geography"
-        subtitle={geoAudience === "teacher" ? "Teachers" : "Anonymous visitors"}
+        subtitle={rangeLabel}
+        info="Where visitors are located, by country, state, and city. Toggle between anonymous visitors and teachers."
       >
         <div className="mb-4">{audienceToggle(geoAudience, setGeoAudience)}</div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div>
-            <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">
+            <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2 text-center">
               Countries
             </h3>
             <DonutWithTable
@@ -454,7 +502,7 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
             />
           </div>
           <div>
-            <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">
+            <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2 text-center">
               States / regions
             </h3>
             <DonutWithTable
@@ -463,19 +511,20 @@ function WebsiteBody({ data, rangeLabel }: { data: WebsiteReport; rangeLabel: st
                 count: r.count,
               }))}
               height={230}
+              pieMax={9}
             />
           </div>
           <div>
-            <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">
+            <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2 text-center">
               Cities
             </h3>
-            <DonutWithTable rows={geo.cities} height={230} />
+            <DonutWithTable rows={geo.cities} height={230} pieMax={9} />
           </div>
         </div>
       </Section>
 
       {/* ── Courses ────────────────────────────────────────────────────── */}
-      <CoursesSection courses={data.courses} />
+      <CoursesSection courses={data.courses} rangeLabel={rangeLabel} />
 
       {/* ── Lumen ──────────────────────────────────────────────────────── */}
       <LumenSection data={data} rangeLabel={rangeLabel} granularity={granularity} />
@@ -592,7 +641,13 @@ type LessonSortKey =
   | "feedback"
   | "lumenSessions";
 
-function CoursesSection({ courses }: { courses: CourseReport[] }) {
+function CoursesSection({
+  courses,
+  rangeLabel,
+}: {
+  courses: CourseReport[];
+  rangeLabel: string;
+}) {
   const defaultSlug =
     courses.find((c) => c.slug === "intro-to-ai")?.slug ?? courses[0]?.slug ?? "";
   const [selected, setSelected] = useState(defaultSlug);
@@ -611,7 +666,7 @@ function CoursesSection({ courses }: { courses: CourseReport[] }) {
     (a, b) => (sortValue(a, sort.key) - sortValue(b, sort.key)) * sort.dir
   );
 
-  const header = (label: string, key: LessonSortKey, alignRight = true) => (
+  const header = (label: string, key: LessonSortKey, left = false) => (
     <button
       onClick={() =>
         setSort((s) =>
@@ -620,8 +675,8 @@ function CoursesSection({ courses }: { courses: CourseReport[] }) {
             : { key, dir: key === "number" ? 1 : -1 }
         )
       }
-      className={`w-full uppercase tracking-wide text-xs font-semibold ${
-        alignRight ? "text-right" : "text-left"
+      className={`w-full uppercase tracking-wide text-xs font-semibold whitespace-nowrap ${
+        left ? "text-left" : "text-center"
       } ${sort.key === key ? "text-violet-700" : "text-gray-500 hover:text-gray-800"}`}
     >
       {label}
@@ -631,33 +686,30 @@ function CoursesSection({ courses }: { courses: CourseReport[] }) {
 
   return (
     <>
-      <h2 className="text-lg font-bold text-gray-900 mt-10 mb-1">Courses</h2>
-      <p className="text-sm text-gray-500 mb-4">
-        Structure comes from the CMS — new courses and lessons appear here automatically.
-      </p>
-      <div className="mb-4">
-        {courses.length <= 4 ? (
-          <SegmentedControl
-            value={course.slug}
-            onChange={setSelected}
-            options={courses.map((c) => ({ value: c.slug, label: c.title }))}
-          />
-        ) : (
-          <select
-            value={course.slug}
-            onChange={(e) => setSelected(e.target.value)}
-            className="px-3 py-1.5 bg-white border border-gray-200 rounded-md text-sm"
-          >
-            {courses.map((c) => (
-              <option key={c.slug} value={c.slug}>{c.title}</option>
-            ))}
-          </select>
-        )}
+      <h2 className="text-lg font-bold text-gray-900 mt-10 mb-3">
+        Courses
+        <InfoTip text="Structure comes from the CMS — new courses, lessons, and pages appear here automatically when published." />
+      </h2>
+      <div className="mb-4 flex items-center gap-2">
+        <label htmlFor="course-select" className="text-sm text-gray-600">
+          Course:
+        </label>
+        <select
+          id="course-select"
+          value={course.slug}
+          onChange={(e) => setSelected(e.target.value)}
+          className="px-3 py-1.5 bg-white border border-gray-200 rounded-md text-sm text-gray-800"
+        >
+          {courses.map((c) => (
+            <option key={c.slug} value={c.slug}>{c.title}</option>
+          ))}
+        </select>
       </div>
 
       <Section
         title={course.title}
-        subtitle={`/courses/${course.slug}`}
+        subtitle={rangeLabel}
+        info={`Lives at /courses/${course.slug}. Click a column heading to sort; click a lesson row for its full breakdown, including per-page numbers.`}
         exportData={course.lessons.map((l) => ({
           number: l.number,
           lesson: l.title,
@@ -693,10 +745,10 @@ function CoursesSection({ courses }: { courses: CourseReport[] }) {
 
         {course.lessons.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[860px]">
+            <table className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr className="border-b border-gray-200">
-                  <th className="py-2 pr-2 w-2/5">{header("Lesson", "number", false)}</th>
+                  <th className="py-2 pr-2 w-2/5">{header("Lesson", "number", true)}</th>
                   <th className="py-2 px-2">{header("Page views", "pageViews")}</th>
                   <th className="py-2 px-2">{header("Teacher visits", "teacherSessions")}</th>
                   <th className="py-2 px-2">{header("Interactions", "interactions")}</th>
@@ -718,16 +770,16 @@ function CoursesSection({ courses }: { courses: CourseReport[] }) {
                       <span className="text-gray-400 mr-1.5">{lesson.number}.</span>
                       {lesson.title}
                     </td>
-                    <td className="py-2 px-2 text-right">{num(lesson.pageViews)}</td>
-                    <td className="py-2 px-2 text-right">{num(lesson.teacherSessions)}</td>
-                    <td className="py-2 px-2 text-right">{num(lesson.interactions)}</td>
-                    <td className="py-2 px-2 text-right">{num(lesson.inlineQuizCompletes)}</td>
-                    <td className="py-2 px-2 text-right">{num(lesson.quizCompletes)}</td>
-                    <td className="py-2 px-2 text-right">{num(lesson.certificates)}</td>
-                    <td className="py-2 px-2 text-right">
+                    <td className="py-2 px-2 text-center">{num(lesson.pageViews)}</td>
+                    <td className="py-2 px-2 text-center">{num(lesson.teacherSessions)}</td>
+                    <td className="py-2 px-2 text-center">{num(lesson.interactions)}</td>
+                    <td className="py-2 px-2 text-center">{num(lesson.inlineQuizCompletes)}</td>
+                    <td className="py-2 px-2 text-center">{num(lesson.quizCompletes)}</td>
+                    <td className="py-2 px-2 text-center">{num(lesson.certificates)}</td>
+                    <td className="py-2 px-2 text-center">
                       {lesson.lumen ? num(lesson.lumen.sessions) : "—"}
                     </td>
-                    <td className="py-2 pl-2 text-right">{num(lesson.feedback)}</td>
+                    <td className="py-2 pl-2 text-center">{num(lesson.feedback)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -766,7 +818,7 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
           : p.lumen?.sessions ?? -1;
   const pages = [...numbered].sort((a, b) => (sortValue(a) - sortValue(b)) * sort.dir);
 
-  const header = (label: string, key: PageSortKey, alignRight = true) => (
+  const header = (label: string, key: PageSortKey, left = false) => (
     <button
       onClick={() =>
         setSort((s) =>
@@ -775,8 +827,8 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
             : { key, dir: key === "index" ? 1 : -1 }
         )
       }
-      className={`w-full uppercase tracking-wide text-xs font-semibold ${
-        alignRight ? "text-right" : "text-left"
+      className={`w-full uppercase tracking-wide text-xs font-semibold whitespace-nowrap ${
+        left ? "text-left" : "text-center"
       } ${sort.key === key ? "text-violet-700" : "text-gray-500 hover:text-gray-800"}`}
     >
       {label}
@@ -864,7 +916,7 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
           <table className="w-full text-sm min-w-[560px]">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="py-2 pr-2 w-1/2">{header("Page", "index", false)}</th>
+                <th className="py-2 pr-2 w-1/2">{header("Page", "index", true)}</th>
                 <th className="py-2 px-2">{header("Views", "views")}</th>
                 <th className="py-2 px-2">{header("Interactions", "interactions")}</th>
                 <th className="py-2 pl-2">{header("Lumen sessions", "lumen")}</th>
@@ -882,12 +934,12 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
                       </span>
                     )}
                   </td>
-                  <td className="py-2 px-2 text-right">{num(p.views)}</td>
-                  <td className="py-2 px-2 text-right">
+                  <td className="py-2 px-2 text-center">{num(p.views)}</td>
+                  <td className="py-2 px-2 text-center">
                     {num(p.interactions)}
                     {p.interactionsSince && <span className="text-gray-400">*</span>}
                   </td>
-                  <td className="py-2 pl-2 text-right">
+                  <td className="py-2 pl-2 text-center">
                     {p.lumen ? num(p.lumen.sessions) : "—"}
                   </td>
                 </tr>
@@ -953,7 +1005,8 @@ function LumenSection({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         <Section
           title="Scenarios"
-          subtitle="Share of Lumen sessions per scenario"
+          subtitle={rangeLabel}
+          info="Share of Lumen sessions per scenario, with where each scenario is embedded in course content."
           exportData={data.lumen.byScenario.map((s) => ({
             scenario: s.scenario,
             location: s.location
@@ -990,7 +1043,8 @@ function LumenSection({
 
         <Section
           title="Top prompts"
-          subtitle="Share of clicks on predefined prompts"
+          subtitle={rangeLabel}
+          info="Most-clicked predefined prompts across all Lumen scenarios."
           exportData={data.lumen.topPrompts}
           exportName="website-lumen-prompts"
         >
@@ -1010,7 +1064,8 @@ function LumenSection({
 
       <Section
         title="Lumen responses over time"
-        subtitle={`AI responses · ${rangeLabel}`}
+        subtitle={rangeLabel}
+        info="AI responses generated in Lumen activities per period."
         exportData={responsesTrend}
         exportName="website-lumen-daily"
       >
@@ -1076,7 +1131,8 @@ function TeachersSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel
       {t.schools.length > 0 && (
         <Section
           title="Schools"
-          subtitle="Teacher activity aggregated by school"
+          subtitle={rangeLabel}
+          info="Teacher activity aggregated by the school recorded at signup."
           exportData={t.schools.map((s) => ({ ...s }))}
           exportName="website-schools"
         >
@@ -1095,7 +1151,8 @@ function TeachersSection({ data, rangeLabel }: { data: WebsiteReport; rangeLabel
 
       <Section
         title="Teacher activity"
-        subtitle="Per pseudonymous teacher — visits, lessons reached, first/last seen"
+        subtitle={rangeLabel}
+        info="One row per pseudonymous teacher: visits, page views, first/last seen, and the lessons they reached."
         exportData={t.rows.map((r) => ({ ...r, lessons: r.lessons.join(", ") }))}
         exportName="website-teachers"
       >

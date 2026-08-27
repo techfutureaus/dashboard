@@ -1229,7 +1229,7 @@ function LumenSection({
           exportName="website-lumen-prompts"
         >
           <Donut data={promptPie} />
-          <table className="w-auto text-sm">
+          <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200">
                 <th className="py-2 pr-6 text-left uppercase tracking-wide text-xs font-semibold text-gray-500">

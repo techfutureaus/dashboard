@@ -553,12 +553,10 @@ function CoursesSection({
         Courses
         <InfoTip text="Structure comes from the CMS — new courses, lessons, and pages appear here automatically when published." />
       </h2>
-      <div className="mb-4 flex items-center gap-2">
-        <label htmlFor="course-select" className="text-sm text-gray-600">
-          Course:
-        </label>
+      <div className="mb-4">
         <select
           id="course-select"
+          aria-label="Course"
           value={course.slug}
           onChange={(e) => setSelected(e.target.value)}
           className="px-3 py-1.5 bg-white border border-gray-200 rounded-md text-sm text-gray-800"
@@ -746,12 +744,20 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-          <KpiCard label="Lesson views" value={num(lesson.lessonViews)} />
-          <KpiCard label="Page views" value={num(lesson.pageViews)} />
+          <KpiCard
+            label="Lesson views"
+            value={num(lesson.lessonViews)}
+            info="Times this lesson was opened."
+          />
+          <KpiCard
+            label="Page views"
+            value={num(lesson.pageViews)}
+            info="Views across all pages inside this lesson."
+          />
           <KpiCard
             label="Teacher visits"
             value={num(lesson.teacherSessions)}
-            sub="teacher sessions reaching this lesson"
+            info="Teacher sessions that reached this lesson."
           />
           <KpiCard
             label="Teacher vs anon views"
@@ -760,12 +766,28 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
                 ? `${num(lesson.teacherPageViews)} / ${num(lesson.anonymousPageViews)}`
                 : "–"
             }
-            sub="page views"
+            info="This lesson's page views split into teacher / anonymous. Newly tracked, so counts build from a recent start."
           />
-          <KpiCard label="Interactions" value={num(lesson.interactions)} />
-          <KpiCard label="Inline quizzes" value={num(lesson.inlineQuizCompletes)} />
-          <KpiCard label="Quiz completions" value={num(lesson.quizCompletes)} />
-          <KpiCard label="Certificates" value={num(lesson.certificates)} />
+          <KpiCard
+            label="Interactions"
+            value={num(lesson.interactions)}
+            info="Accordion opens, reveals, tab switches, audio and video plays, and link/resource clicks — full breakdown below."
+          />
+          <KpiCard
+            label="Inline quizzes"
+            value={num(lesson.inlineQuizCompletes)}
+            info="Knowledge-check quizzes completed inside this lesson's pages."
+          />
+          <KpiCard
+            label="Quiz completions"
+            value={num(lesson.quizCompletes)}
+            info="End-of-lesson quiz completions (practice-until-correct, so completing always means 100%)."
+          />
+          <KpiCard
+            label="Certificates"
+            value={num(lesson.certificates)}
+            info="Certificates generated after completing this lesson's quiz."
+          />
           <KpiCard
             label="Lumen sessions"
             value={lesson.lumen ? num(lesson.lumen.sessions) : "—"}
@@ -774,8 +796,13 @@ function LessonModal({ lesson, onClose }: { lesson: LessonReport; onClose: () =>
                 ? `${num(lesson.lumen.promptClicks)} clicks · ${num(lesson.lumen.responses)} responses`
                 : "no Lumen activity embedded"
             }
+            info="Sessions in the Lumen AI activities embedded in this lesson's pages."
           />
-          <KpiCard label="Feedback" value={num(lesson.feedback)} />
+          <KpiCard
+            label="Feedback"
+            value={num(lesson.feedback)}
+            info="Teacher feedback submissions on this lesson."
+          />
         </div>
 
         {interactionRows.length > 0 && (
@@ -871,14 +898,36 @@ function LumenSection({
     <>
       <h2 className="text-lg font-bold text-gray-900 mt-10 mb-4">Lumen (AI editor)</h2>
       <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
-        <KpiCard label="Sessions" value={num(data.lumen.sessions)} sub={rangeLabel} />
-        <KpiCard label="Prompt clicks" value={num(data.lumen.promptClicks)} />
-        <KpiCard label="Responses" value={num(data.lumen.responses)} />
-        <KpiCard label="Total tokens" value={`≈${num(data.lumen.totalTokens)}`} sub="input + output" />
-        <KpiCard label="Tokens / response" value={`≈${num(data.lumen.avgTokensPerResponse)}`} />
+        <KpiCard
+          label="Sessions"
+          value={num(data.lumen.sessions)}
+          sub={rangeLabel}
+          info="Times a Lumen AI activity was loaded."
+        />
+        <KpiCard
+          label="Prompt clicks"
+          value={num(data.lumen.promptClicks)}
+          info="Clicks on the predefined prompts inside Lumen activities."
+        />
+        <KpiCard
+          label="Responses"
+          value={num(data.lumen.responses)}
+          info="AI responses generated in Lumen activities."
+        />
+        <KpiCard
+          label="Total tokens"
+          value={num(data.lumen.totalTokens)}
+          info="Combined AI usage across all responses — input tokens (what was sent to the model) plus output tokens (what it wrote back)."
+        />
+        <KpiCard
+          label="Tokens / response"
+          value={num(data.lumen.avgTokensPerResponse)}
+          info="Average total tokens per AI response."
+        />
         <KpiCard
           label="Avg response time"
           value={data.lumen.avgResponseMs ? `${(data.lumen.avgResponseMs / 1000).toFixed(1)}s` : "–"}
+          info="Average time for the AI to return a response."
         />
       </div>
 
